@@ -241,6 +241,10 @@ function App() {
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const pingIntervalRef = useRef(null);
+  const pongTimeoutRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const reconnectDelayRef = useRef(1000);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -261,17 +265,45 @@ function App() {
     setTheme(t => t === "system" ? "light" : t === "light" ? "dark" : "system");
   }, []);
 
+  const startPing = useCallback((ws) => {
+    clearInterval(pingIntervalRef.current);
+    clearTimeout(pongTimeoutRef.current);
+
+    pingIntervalRef.current = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }));
+        pongTimeoutRef.current = setTimeout(() => {
+          console.log("Pong timeout — closing connection");
+          ws.close();
+        }, 5000);
+      }
+    }, 30000);
+  }, []);
+
+  const stopPing = useCallback(() => {
+    clearInterval(pingIntervalRef.current);
+    clearTimeout(pongTimeoutRef.current);
+  }, []);
+
   useEffect(() => {
     function connect() {
+      clearTimeout(reconnectTimeoutRef.current);
       const ws = new WebSocket(\`ws://\${window.location.hostname}:3000\`);
       wsRef.current = ws;
 
-      ws.onopen = () => setConnected(true);
+      ws.onopen = () => {
+        setConnected(true);
+        reconnectDelayRef.current = 1000;
+        startPing(ws);
+      };
 
       ws.onclose = () => {
         setConnected(false);
         setStreaming(false);
-        setTimeout(connect, 2000);
+        stopPing();
+        const delay = reconnectDelayRef.current;
+        reconnectDelayRef.current = Math.min(delay * 2, 30000);
+        reconnectTimeoutRef.current = setTimeout(connect, delay);
       };
 
       ws.onerror = () => ws.close();
@@ -279,6 +311,11 @@ function App() {
       ws.onmessage = (event) => {
         let data;
         try { data = JSON.parse(event.data); } catch { return; }
+
+        if (data.type === "pong") {
+          clearTimeout(pongTimeoutRef.current);
+          return;
+        }
 
         if (data.type === "assistant") {
           setActivity(null);
@@ -329,7 +366,11 @@ function App() {
     }
 
     connect();
-    return () => wsRef.current?.close();
+    return () => {
+      stopPing();
+      clearTimeout(reconnectTimeoutRef.current);
+      wsRef.current?.close();
+    };
   }, []);
 
   const send = useCallback(() => {

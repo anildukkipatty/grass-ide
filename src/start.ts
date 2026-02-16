@@ -30,6 +30,12 @@ export async function start() {
         return;
       }
 
+      // Handle ping from client
+      if (parsed.type === "ping") {
+        ws.send(JSON.stringify({ type: "pong" }));
+        return;
+      }
+
       // Handle abort signal
       if (parsed.type === "abort") {
         if (streaming && abortController) {
