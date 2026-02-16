@@ -69,6 +69,7 @@ export async function start() {
             model: "claude-sonnet-4-5-20250929",
             permissionMode: "bypassPermissions",
             abortController,
+            includePartialMessages: true,
             ...(sessionId ? { resume: sessionId } : {}),
           },
         });
@@ -84,8 +85,11 @@ export async function start() {
 
             const payload = formatMessage(msg, msgSeq);
             if (payload) {
-              if (payload.type === "assistant") msgSeq++;
-              ws.send(JSON.stringify(payload));
+              const items = Array.isArray(payload) ? payload : [payload];
+              for (const item of items) {
+                if (item.type === "assistant") msgSeq++;
+                ws.send(JSON.stringify(item));
+              }
             }
           }
         } catch (err: any) {
@@ -140,18 +144,66 @@ export async function start() {
 function formatMessage(
   msg: SDKMessage,
   seq: number
-): Record<string, unknown> | null {
+): Record<string, unknown> | Record<string, unknown>[] | null {
   switch (msg.type) {
     case "system":
-      return { type: "system", subtype: msg.subtype, data: msg };
+      return { type: "system", subtype: (msg as any).subtype, data: msg };
 
     case "assistant": {
+      const payloads: Record<string, unknown>[] = [];
+
       const text = msg.message.content
         .filter((block: any) => block.type === "text")
         .map((block: any) => block.text)
         .join("");
-      if (!text) return null;
-      return { type: "assistant", id: seq, content: text };
+      if (text) {
+        payloads.push({ type: "assistant", id: seq, content: text });
+      }
+
+      for (const block of msg.message.content) {
+        if ((block as any).type === "tool_use") {
+          const b = block as any;
+          payloads.push({
+            type: "tool_use",
+            tool_name: b.name,
+            tool_input: formatToolInput(b.name, b.input),
+          });
+        }
+      }
+
+      return payloads.length === 1 ? payloads[0] : payloads.length > 1 ? payloads : null;
+    }
+
+    case "stream_event": {
+      const event = (msg as any).event;
+      if (event?.type === "content_block_start") {
+        if (event.content_block?.type === "thinking") {
+          return { type: "status", status: "thinking" };
+        }
+        if (event.content_block?.type === "tool_use") {
+          return {
+            type: "status",
+            status: "tool",
+            tool_name: event.content_block.name,
+          };
+        }
+      }
+      return null;
+    }
+
+    case "tool_progress": {
+      const tp = msg as any;
+      return {
+        type: "status",
+        status: "tool",
+        tool_name: tp.tool_name,
+        elapsed: tp.elapsed_time_seconds,
+      };
+    }
+
+    case "tool_use_summary": {
+      const ts = msg as any;
+      return { type: "status", status: "tool_summary", summary: ts.summary };
     }
 
     case "result":
@@ -175,5 +227,38 @@ function formatMessage(
 
     default:
       return null;
+  }
+}
+
+function formatToolInput(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case "Bash":
+      return input.description
+        ? `${input.description}: ${input.command}`
+        : `${input.command}`;
+    case "Read":
+      return `${input.file_path}`;
+    case "Write":
+      return `${input.file_path} (${(input.content as string).length} chars)`;
+    case "Edit":
+      return `${input.file_path}`;
+    case "Glob":
+      return input.path ? `${input.pattern} in ${input.path}` : `${input.pattern}`;
+    case "Grep":
+      return input.path ? `/${input.pattern}/ in ${input.path}` : `/${input.pattern}/`;
+    case "Task":
+      return `[${input.subagent_type}] ${input.description}`;
+    case "WebFetch":
+      return `${input.url}`;
+    case "WebSearch":
+      return `"${input.query}"`;
+    case "NotebookEdit":
+      return `${input.notebook_path} (${input.edit_mode || "replace"})`;
+    case "TodoWrite": {
+      const todos = input.todos as { content: string; status: string }[];
+      return todos.map((t) => `[${t.status}] ${t.content}`).join(", ");
+    }
+    default:
+      return JSON.stringify(input);
   }
 }

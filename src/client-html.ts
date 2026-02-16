@@ -182,6 +182,35 @@ export const html = `<!DOCTYPE html>
   #input-bar button.abort:hover {
     background: #c0392b;
   }
+  .activity-bar {
+    padding: 6px 16px;
+    font-size: 12px;
+    color: var(--badge-text);
+    background: var(--bar-bg);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+  }
+  .activity-bar .dot-pulse {
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
+  }
+  .activity-bar .dot-pulse span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .activity-bar .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+  .activity-bar .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes pulse {
+    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
 </style>
 </head>
 <body>
@@ -207,6 +236,7 @@ function App() {
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [activity, setActivity] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system");
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -251,6 +281,7 @@ function App() {
         try { data = JSON.parse(event.data); } catch { return; }
 
         if (data.type === "assistant") {
+          setActivity(null);
           setMessages(prev => {
             const last = prev[prev.length - 1];
             if (last && last.role === "assistant" && !last.complete && last.msgId === data.id) {
@@ -258,12 +289,26 @@ function App() {
             }
             return [...prev, { role: "assistant", content: data.content, complete: false, msgId: data.id }];
           });
+        } else if (data.type === "status") {
+          if (data.status === "thinking") {
+            setActivity({ label: "Thinking" });
+          } else if (data.status === "tool") {
+            const elapsed = data.elapsed != null ? Math.round(data.elapsed) + "s" : "";
+            setActivity({ label: data.tool_name + (elapsed ? " (" + elapsed + ")" : "") });
+          } else if (data.status === "tool_summary") {
+            setActivity({ label: data.summary });
+          } else {
+            setActivity(null);
+          }
+        } else if (data.type === "tool_use") {
+          setActivity({ label: data.tool_name + ": " + data.tool_input });
         } else if (data.type === "result") {
           setStreaming(false);
+          setActivity(null);
           setMessages(prev => {
             const cost = data.cost != null ? "$" + data.cost.toFixed(4) : null;
             const duration = data.duration_ms != null ? (data.duration_ms / 1000).toFixed(1) + "s" : null;
-            const badge = [cost, duration].filter(Boolean).join(" · ");
+            const badge = [cost, duration].filter(Boolean).join(" \u00B7 ");
             const lastIdx = prev.length - 1;
             return prev.map((msg, i) =>
               msg.role === "assistant" && !msg.complete
@@ -273,9 +318,11 @@ function App() {
           });
         } else if (data.type === "aborted") {
           setStreaming(false);
-          setMessages(prev => [...prev, { role: "error", content: "⚠️ " + data.message }]);
+          setActivity(null);
+          setMessages(prev => [...prev, { role: "error", content: "\u26A0\uFE0F " + data.message }]);
         } else if (data.type === "error") {
           setStreaming(false);
+          setActivity(null);
           setMessages(prev => [...prev, { role: "error", content: data.message }]);
         }
       };
@@ -292,6 +339,7 @@ function App() {
     wsRef.current.send(JSON.stringify({ type: "message", content: text }));
     setInput("");
     setStreaming(true);
+    setActivity({ label: "Thinking" });
   }, [input, connected, streaming]);
 
   const abort = useCallback(() => {
@@ -326,6 +374,12 @@ function App() {
         ))}
         <div ref={messagesEndRef} />
       </div>
+      {activity && (
+        <div className="activity-bar">
+          <div className="dot-pulse"><span /><span /><span /></div>
+          <span>{activity.label}</span>
+        </div>
+      )}
       <div id="input-bar">
         <textarea
           ref={textareaRef}
