@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm link)",
+      "Bash(grass sync:*)",
+      "Bash(grass ls:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(npm view:*)",
+      "Bash(npm run build:*)"
+    ]
+  }
+}
