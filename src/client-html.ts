@@ -334,6 +334,7 @@ function App() {
         startPing(ws);
         const sid = getCurrentSessionId();
         ws.send(JSON.stringify({ type: "init", sessionId: sid }));
+        setTimeout(() => textareaRef.current?.focus(), 0);
       };
 
       ws.onclose = () => {
@@ -410,6 +411,7 @@ function App() {
                 : msg
             );
           });
+          setTimeout(() => textareaRef.current?.focus(), 0);
         } else if (data.type === "aborted") {
           setStreaming(false);
           setActivity(null);
