@@ -85,8 +85,20 @@ export const html = `<!DOCTYPE html>
     align-items: center;
     gap: 8px;
   }
-  .theme-toggle {
+  .new-chat-btn {
     margin-left: auto;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    line-height: 1.4;
+  }
+  .new-chat-btn:hover { background: var(--border); }
+  .new-chat-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .theme-toggle {
     background: none;
     border: none;
     color: var(--toggle-text);
@@ -231,12 +243,37 @@ export const html = `<!DOCTYPE html>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
+const SESSIONS_KEY = "grass_sessions";
+const CURRENT_KEY = "grass_current_session";
+
+function loadSessions() {
+  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY)) || []; } catch { return []; }
+}
+function saveSessions(sessions) { localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions)); }
+function getCurrentSessionId() { return localStorage.getItem(CURRENT_KEY) || null; }
+function setCurrentSessionId(id) {
+  if (id) localStorage.setItem(CURRENT_KEY, id);
+  else localStorage.removeItem(CURRENT_KEY);
+}
+function addOrUpdateSession(id) {
+  const sessions = loadSessions();
+  const now = new Date().toISOString();
+  const idx = sessions.findIndex(s => s.id === id);
+  if (idx >= 0) {
+    sessions[idx].updatedAt = now;
+  } else {
+    sessions.push({ id, label: "Chat " + (sessions.length + 1), createdAt: now, updatedAt: now });
+  }
+  saveSessions(sessions);
+}
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [activity, setActivity] = useState(null);
+  const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system");
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -295,6 +332,8 @@ function App() {
         setConnected(true);
         reconnectDelayRef.current = 1000;
         startPing(ws);
+        const sid = getCurrentSessionId();
+        ws.send(JSON.stringify({ type: "init", sessionId: sid }));
       };
 
       ws.onclose = () => {
@@ -314,6 +353,24 @@ function App() {
 
         if (data.type === "pong") {
           clearTimeout(pongTimeoutRef.current);
+          return;
+        }
+
+        if (data.type === "system" && data.subtype === "init" && data.data?.session_id) {
+          const sid = data.data.session_id;
+          setCurrentSessionId(sid);
+          addOrUpdateSession(sid);
+          setSessionId(sid);
+          return;
+        }
+
+        if (data.type === "history") {
+          setMessages(data.messages.map((m, i) => ({
+            role: m.role,
+            content: m.content,
+            complete: true,
+            msgId: "history-" + i,
+          })));
           return;
         }
 
@@ -388,6 +445,14 @@ function App() {
     wsRef.current.send(JSON.stringify({ type: "abort" }));
   }, [connected, streaming]);
 
+  const newChat = useCallback(() => {
+    setCurrentSessionId(null);
+    setSessionId(null);
+    setMessages([]);
+    setActivity(null);
+    if (wsRef.current) wsRef.current.close();
+  }, []);
+
   const handleKeyDown = useCallback((e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -402,6 +467,7 @@ function App() {
       <div id="status-bar">
         <div className={"status-dot" + (connected ? " connected" : "")} />
         <span>{connected ? (streaming ? "Streaming..." : "Connected") : "Connecting..."}</span>
+        <button className="new-chat-btn" onClick={newChat} disabled={streaming}>New Chat</button>
         <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme}>
           {theme === "light" ? "\u2600\uFE0F" : theme === "dark" ? "\uD83C\uDF19" : "\uD83D\uDCBB"}
         </button>

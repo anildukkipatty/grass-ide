@@ -1,5 +1,9 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { createReadStream, existsSync } from "fs";
+import { createInterface } from "readline";
+import { join } from "path";
+import { homedir } from "os";
 
 const PORT = 3000;
 
@@ -22,7 +26,7 @@ export async function start() {
     let sessionId: string | null = null;
 
     ws.on("message", async (raw) => {
-      let parsed: { type: string; content?: string };
+      let parsed: { type: string; content?: string; sessionId?: string };
       try {
         parsed = JSON.parse(raw.toString());
       } catch {
@@ -41,6 +45,19 @@ export async function start() {
         if (streaming && abortController) {
           abortController.abort();
           console.log("Client requested abort");
+        }
+        return;
+      }
+
+      // Handle init — client sends sessionId to resume
+      if (parsed.type === "init") {
+        if (parsed.sessionId && typeof parsed.sessionId === "string") {
+          sessionId = parsed.sessionId;
+          console.log("Client requested session resume:", sessionId);
+          const history = await loadTranscript(sessionId, cwd);
+          if (history.length > 0) {
+            ws.send(JSON.stringify({ type: "history", messages: history }));
+          }
         }
         return;
       }
@@ -233,6 +250,68 @@ function formatMessage(
 
     default:
       return null;
+  }
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text)
+      .join("");
+  }
+  return "";
+}
+
+async function loadTranscript(
+  sessionId: string,
+  cwd: string
+): Promise<{ role: string; content: string }[]> {
+  const encodedCwd = cwd.replace(/\//g, "-");
+  const transcriptPath = join(
+    homedir(),
+    ".claude",
+    "projects",
+    encodedCwd,
+    `${sessionId}.jsonl`
+  );
+
+  if (!existsSync(transcriptPath)) return [];
+
+  const messages: { role: string; content: string }[] = [];
+
+  try {
+    const rl = createInterface({
+      input: createReadStream(transcriptPath, { encoding: "utf-8" }),
+      crlfDelay: Infinity,
+    });
+
+    for await (const line of rl) {
+      if (!line) continue;
+      let entry: any;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (entry.type === "user" && entry.userType === "external" && !entry.isMeta) {
+        const text = extractText(entry.message?.content);
+        if (text) messages.push({ role: "user", content: text });
+      }
+
+      if (entry.type === "assistant") {
+        const text = extractText(entry.message?.content);
+        if (text) messages.push({ role: "assistant", content: text });
+      }
+    }
+
+    console.log(`Loaded ${messages.length} messages from transcript`);
+    return messages;
+  } catch (err: any) {
+    console.error("Error reading transcript:", err.message);
+    return [];
   }
 }
 
