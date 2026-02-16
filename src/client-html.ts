@@ -2,13 +2,75 @@ export const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>grass client</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #f5f5f5;
+    --text: #1a1a1a;
+    --bar-bg: #e8e8e8;
+    --border: #d0d0d0;
+    --msg-user-bg: #0066cc;
+    --msg-user-text: #fff;
+    --msg-assistant-bg: #fff;
+    --msg-assistant-text: #1a1a1a;
+    --msg-assistant-border: #d0d0d0;
+    --msg-error-bg: #fff0f0;
+    --msg-error-text: #cc0000;
+    --msg-error-border: #cc0000;
+    --input-bg: #fff;
+    --input-text: #1a1a1a;
+    --accent: #0066cc;
+    --accent-hover: #0052a3;
+    --badge-text: #888;
+    --toggle-text: #666;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) {
+      --bg: #1a1a2e;
+      --text: #e0e0e0;
+      --bar-bg: #16213e;
+      --border: #0f3460;
+      --msg-user-bg: #0f3460;
+      --msg-user-text: #e0e0e0;
+      --msg-assistant-bg: #16213e;
+      --msg-assistant-text: #e0e0e0;
+      --msg-assistant-border: #0f3460;
+      --msg-error-bg: #3c1414;
+      --msg-error-text: #e74c3c;
+      --msg-error-border: #e74c3c;
+      --input-bg: #1a1a2e;
+      --input-text: #e0e0e0;
+      --accent: #533483;
+      --accent-hover: #6c44a2;
+      --badge-text: #888;
+      --toggle-text: #aaa;
+    }
+  }
+  :root.dark {
+    --bg: #1a1a2e;
+    --text: #e0e0e0;
+    --bar-bg: #16213e;
+    --border: #0f3460;
+    --msg-user-bg: #0f3460;
+    --msg-user-text: #e0e0e0;
+    --msg-assistant-bg: #16213e;
+    --msg-assistant-text: #e0e0e0;
+    --msg-assistant-border: #0f3460;
+    --msg-error-bg: #3c1414;
+    --msg-error-text: #e74c3c;
+    --msg-error-border: #e74c3c;
+    --input-bg: #1a1a2e;
+    --input-text: #e0e0e0;
+    --accent: #533483;
+    --accent-hover: #6c44a2;
+    --badge-text: #888;
+    --toggle-text: #aaa;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; touch-action: pan-x pan-y; }
   body {
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg);
+    color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
     height: 100vh;
     display: flex;
@@ -17,11 +79,21 @@ export const html = `<!DOCTYPE html>
   #status-bar {
     padding: 8px 16px;
     font-size: 12px;
-    background: #16213e;
-    border-bottom: 1px solid #0f3460;
+    background: var(--bar-bg);
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .theme-toggle {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--toggle-text);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
   }
   .status-dot {
     width: 8px; height: 8px;
@@ -48,39 +120,39 @@ export const html = `<!DOCTYPE html>
   }
   .msg.user {
     align-self: flex-end;
-    background: #0f3460;
-    color: #e0e0e0;
+    background: var(--msg-user-bg);
+    color: var(--msg-user-text);
   }
   .msg.assistant {
     align-self: flex-start;
-    background: #16213e;
-    color: #e0e0e0;
-    border: 1px solid #0f3460;
+    background: var(--msg-assistant-bg);
+    color: var(--msg-assistant-text);
+    border: 1px solid var(--msg-assistant-border);
   }
   .msg.error {
     align-self: center;
-    background: #3c1414;
-    color: #e74c3c;
-    border: 1px solid #e74c3c;
+    background: var(--msg-error-bg);
+    color: var(--msg-error-text);
+    border: 1px solid var(--msg-error-border);
     font-size: 13px;
   }
   .badge {
     font-size: 11px;
-    color: #888;
+    color: var(--badge-text);
     margin-top: 4px;
   }
   #input-bar {
     padding: 12px 16px;
-    background: #16213e;
-    border-top: 1px solid #0f3460;
+    background: var(--bar-bg);
+    border-top: 1px solid var(--border);
     display: flex;
     gap: 8px;
   }
   #input-bar textarea {
     flex: 1;
-    background: #1a1a2e;
-    color: #e0e0e0;
-    border: 1px solid #0f3460;
+    background: var(--input-bg);
+    color: var(--input-text);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 10px 12px;
     font-size: 14px;
@@ -90,10 +162,10 @@ export const html = `<!DOCTYPE html>
     min-height: 42px;
     max-height: 120px;
   }
-  #input-bar textarea:focus { border-color: #533483; }
+  #input-bar textarea:focus { border-color: var(--accent); }
   #input-bar textarea:disabled { opacity: 0.5; }
   #input-bar button {
-    background: #533483;
+    background: var(--accent);
     color: #fff;
     border: none;
     border-radius: 6px;
@@ -102,7 +174,7 @@ export const html = `<!DOCTYPE html>
     cursor: pointer;
     white-space: nowrap;
   }
-  #input-bar button:hover { background: #6c44a2; }
+  #input-bar button:hover { background: var(--accent-hover); }
   #input-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
 </head>
@@ -129,6 +201,7 @@ function App() {
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system");
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -142,8 +215,19 @@ function App() {
   }, [messages, scrollToBottom]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove("light", "dark");
+    if (theme !== "system") root.classList.add(theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const cycleTheme = useCallback(() => {
+    setTheme(t => t === "system" ? "light" : t === "light" ? "dark" : "system");
+  }, []);
+
+  useEffect(() => {
     function connect() {
-      const ws = new WebSocket("ws://localhost:3000");
+      const ws = new WebSocket(\`ws://\${window.location.hostname}:3000\`);
       wsRef.current = ws;
 
       ws.onopen = () => setConnected(true);
@@ -163,22 +247,23 @@ function App() {
         if (data.type === "assistant") {
           setMessages(prev => {
             const last = prev[prev.length - 1];
-            if (last && last.role === "assistant" && !last.complete) {
+            if (last && last.role === "assistant" && !last.complete && last.msgId === data.id) {
               return [...prev.slice(0, -1), { ...last, content: data.content }];
             }
-            return [...prev, { role: "assistant", content: data.content, complete: false }];
+            return [...prev, { role: "assistant", content: data.content, complete: false, msgId: data.id }];
           });
         } else if (data.type === "result") {
           setStreaming(false);
           setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === "assistant") {
-              const cost = data.cost != null ? "$" + data.cost.toFixed(4) : null;
-              const duration = data.duration_ms != null ? (data.duration_ms / 1000).toFixed(1) + "s" : null;
-              const badge = [cost, duration].filter(Boolean).join(" · ");
-              return [...prev.slice(0, -1), { ...last, complete: true, badge }];
-            }
-            return prev;
+            const cost = data.cost != null ? "$" + data.cost.toFixed(4) : null;
+            const duration = data.duration_ms != null ? (data.duration_ms / 1000).toFixed(1) + "s" : null;
+            const badge = [cost, duration].filter(Boolean).join(" · ");
+            const lastIdx = prev.length - 1;
+            return prev.map((msg, i) =>
+              msg.role === "assistant" && !msg.complete
+                ? { ...msg, complete: true, ...(i === lastIdx ? { badge } : {}) }
+                : msg
+            );
           });
         } else if (data.type === "error") {
           setStreaming(false);
@@ -214,6 +299,9 @@ function App() {
       <div id="status-bar">
         <div className={"status-dot" + (connected ? " connected" : "")} />
         <span>{connected ? (streaming ? "Streaming..." : "Connected") : "Connecting..."}</span>
+        <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme}>
+          {theme === "light" ? "\u2600\uFE0F" : theme === "dark" ? "\uD83C\uDF19" : "\uD83D\uDCBB"}
+        </button>
       </div>
       <div id="messages">
         {messages.map((msg, i) => (

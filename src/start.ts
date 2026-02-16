@@ -25,6 +25,7 @@ export async function start() {
     });
 
     let streaming = false;
+    let msgSeq = 0;
 
     ws.on("message", async (raw) => {
       let parsed: { type: string; content: string };
@@ -63,8 +64,9 @@ export async function start() {
         for await (const msg of session.stream()) {
           if (ws.readyState !== WebSocket.OPEN) break;
 
-          const payload = formatMessage(msg);
+          const payload = formatMessage(msg, msgSeq);
           if (payload) {
+            if (payload.type === "assistant") msgSeq++;
             ws.send(JSON.stringify(payload));
           }
         }
@@ -102,20 +104,21 @@ export async function start() {
 }
 
 function formatMessage(
-  msg: SDKMessage
+  msg: SDKMessage,
+  seq: number
 ): Record<string, unknown> | null {
   switch (msg.type) {
     case "system":
       return { type: "system", subtype: msg.subtype, data: msg };
 
-    case "assistant":
-      return {
-        type: "assistant",
-        content: msg.message.content
-          .filter((block: any) => block.type === "text")
-          .map((block: any) => block.text)
-          .join(""),
-      };
+    case "assistant": {
+      const text = msg.message.content
+        .filter((block: any) => block.type === "text")
+        .map((block: any) => block.text)
+        .join("");
+      if (!text) return null;
+      return { type: "assistant", id: seq, content: text };
+    }
 
     case "result":
       if (msg.subtype === "success") {
