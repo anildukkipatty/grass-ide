@@ -1,8 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
-import {
-  unstable_v2_createSession,
-  type SDKMessage,
-} from "@anthropic-ai/claude-agent-sdk";
+import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 const PORT = 3000;
 
@@ -19,16 +16,13 @@ export async function start() {
   wss.on("connection", (ws) => {
     console.log("Client connected");
 
-    const session = unstable_v2_createSession({
-      model: "claude-sonnet-4-5-20250929",
-      permissionMode: "bypassPermissions",
-    });
-
     let streaming = false;
     let msgSeq = 0;
+    let abortController: AbortController | null = null;
+    let sessionId: string | null = null;
 
     ws.on("message", async (raw) => {
-      let parsed: { type: string; content: string };
+      let parsed: { type: string; content?: string };
       try {
         parsed = JSON.parse(raw.toString());
       } catch {
@@ -36,11 +30,20 @@ export async function start() {
         return;
       }
 
+      // Handle abort signal
+      if (parsed.type === "abort") {
+        if (streaming && abortController) {
+          abortController.abort();
+          console.log("Client requested abort");
+        }
+        return;
+      }
+
       if (parsed.type !== "message" || typeof parsed.content !== "string") {
         ws.send(
           JSON.stringify({
             type: "error",
-            message: 'Expected { type: "message", content: string }',
+            message: 'Expected { type: "message", content: string } or { type: "abort" }',
           })
         );
         return;
@@ -57,17 +60,47 @@ export async function start() {
       }
 
       streaming = true;
+      abortController = new AbortController();
 
       try {
-        await session.send(parsed.content);
+        const q = query({
+          prompt: parsed.content,
+          options: {
+            model: "claude-sonnet-4-5-20250929",
+            permissionMode: "bypassPermissions",
+            abortController,
+            ...(sessionId ? { resume: sessionId } : {}),
+          },
+        });
 
-        for await (const msg of session.stream()) {
-          if (ws.readyState !== WebSocket.OPEN) break;
+        try {
+          for await (const msg of q) {
+            if (ws.readyState !== WebSocket.OPEN) break;
 
-          const payload = formatMessage(msg, msgSeq);
-          if (payload) {
-            if (payload.type === "assistant") msgSeq++;
-            ws.send(JSON.stringify(payload));
+            // Capture session ID from init message
+            if (msg.type === "system" && msg.subtype === "init") {
+              sessionId = (msg as any).session_id ?? sessionId;
+            }
+
+            const payload = formatMessage(msg, msgSeq);
+            if (payload) {
+              if (payload.type === "assistant") msgSeq++;
+              ws.send(JSON.stringify(payload));
+            }
+          }
+        } catch (err: any) {
+          if (err?.name === "AbortError" || abortController.signal.aborted) {
+            console.log("Request aborted successfully");
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(
+                JSON.stringify({
+                  type: "aborted",
+                  message: "Request aborted by user",
+                })
+              );
+            }
+          } else {
+            throw err;
           }
         }
       } catch (err: any) {
@@ -81,12 +114,13 @@ export async function start() {
         }
       } finally {
         streaming = false;
+        abortController = null;
       }
     });
 
     ws.on("close", () => {
       console.log("Client disconnected");
-      session.close();
+      if (abortController) abortController.abort();
     });
   });
 

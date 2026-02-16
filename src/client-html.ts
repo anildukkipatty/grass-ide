@@ -176,6 +176,12 @@ export const html = `<!DOCTYPE html>
   }
   #input-bar button:hover { background: var(--accent-hover); }
   #input-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #input-bar button.abort {
+    background: #e74c3c;
+  }
+  #input-bar button.abort:hover {
+    background: #c0392b;
+  }
 </style>
 </head>
 <body>
@@ -265,6 +271,9 @@ function App() {
                 : msg
             );
           });
+        } else if (data.type === "aborted") {
+          setStreaming(false);
+          setMessages(prev => [...prev, { role: "error", content: "⚠️ " + data.message }]);
         } else if (data.type === "error") {
           setStreaming(false);
           setMessages(prev => [...prev, { role: "error", content: data.message }]);
@@ -284,6 +293,11 @@ function App() {
     setInput("");
     setStreaming(true);
   }, [input, connected, streaming]);
+
+  const abort = useCallback(() => {
+    if (!connected || !streaming) return;
+    wsRef.current.send(JSON.stringify({ type: "abort" }));
+  }, [connected, streaming]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -322,9 +336,15 @@ function App() {
           rows={1}
           disabled={disabled}
         />
-        <button onClick={send} disabled={disabled || !input.trim()}>
-          Send
-        </button>
+        {streaming ? (
+          <button onClick={abort} className="abort">
+            Abort
+          </button>
+        ) : (
+          <button onClick={send} disabled={disabled || !input.trim()}>
+            Send
+          </button>
+        )}
       </div>
     </>
   );
