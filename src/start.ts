@@ -1,4 +1,3 @@
-import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createReadStream, existsSync } from "fs";
@@ -14,17 +13,9 @@ export async function start() {
   console.log(`  cwd:  ${cwd}`);
   console.log(`  port: ${PORT}`);
 
-  const server = http.createServer((_req, res) => {
-    res.writeHead(426);
-    res.end("WebSocket connections only");
-  });
-  server.keepAliveTimeout = 0;
+  const wss = new WebSocketServer({ port: PORT });
 
-  const wss = new WebSocketServer({ server });
-
-  server.listen(PORT, () => {
-    console.log(`\nListening on ws://localhost:${PORT}`);
-  });
+  console.log(`\nListening on ws://localhost:${PORT}`);
 
   wss.on("connection", (ws) => {
     console.log("Client connected");
@@ -164,8 +155,7 @@ export async function start() {
   const shutdown = () => {
     console.log("\nShutting down...");
     wss.clients.forEach((ws) => ws.close());
-    wss.close();
-    server.close(() => {
+    wss.close(() => {
       process.exit(0);
     });
   };

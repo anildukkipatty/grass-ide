@@ -271,6 +271,7 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [activity, setActivity] = useState(null);
   const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
@@ -323,13 +324,26 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let connectTimeout = null;
+
     function connect() {
       clearTimeout(reconnectTimeoutRef.current);
-      const ws = new WebSocket(\`ws://\${window.location.hostname}:3000\`);
+      clearTimeout(connectTimeout);
+      let ws = new WebSocket(\`ws://\${window.location.hostname}:3000\`);
       wsRef.current = ws;
 
+      // If the upgrade doesn't complete within 5s, kill and retry
+      connectTimeout = setTimeout(() => {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          console.log("WebSocket connect timeout — retrying");
+          ws.close();
+        }
+      }, 5000);
+
       ws.onopen = () => {
+        clearTimeout(connectTimeout);
         setConnected(true);
+        setReconnecting(false);
         reconnectDelayRef.current = 1000;
         startPing(ws);
         const sid = getCurrentSessionId();
@@ -338,12 +352,16 @@ function App() {
       };
 
       ws.onclose = () => {
+        clearTimeout(connectTimeout);
         setConnected(false);
         setStreaming(false);
         stopPing();
         const delay = reconnectDelayRef.current;
         reconnectDelayRef.current = Math.min(delay * 2, 30000);
-        reconnectTimeoutRef.current = setTimeout(connect, delay);
+        reconnectTimeoutRef.current = setTimeout(() => {
+          setReconnecting(true);
+          connect();
+        }, delay);
       };
 
       ws.onerror = () => ws.close();
@@ -427,6 +445,7 @@ function App() {
     connect();
     return () => {
       stopPing();
+      clearTimeout(connectTimeout);
       clearTimeout(reconnectTimeoutRef.current);
       wsRef.current?.close();
     };
@@ -468,7 +487,7 @@ function App() {
     <>
       <div id="status-bar">
         <div className={"status-dot" + (connected ? " connected" : "")} />
-        <span>{connected ? (streaming ? "Streaming..." : "Connected") : "Connecting..."}</span>
+        <span>{connected ? (streaming ? "Streaming..." : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
         <button className="new-chat-btn" onClick={newChat} disabled={streaming}>New Chat</button>
         <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme}>
           {theme === "light" ? "\u2600\uFE0F" : theme === "dark" ? "\uD83C\uDF19" : "\uD83D\uDCBB"}
