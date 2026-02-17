@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" alt="Grass" width="500" />
+
 # grass
 
 **Claude on your phone. Code on your machine.**
