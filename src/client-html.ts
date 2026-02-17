@@ -92,27 +92,8 @@ export const html = `<!DOCTYPE html>
   }
   .new-chat-btn {
     background: none;
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-size: 13px;
-    cursor: pointer;
-    padding: 6px 14px;
-    border-radius: 8px;
-    line-height: 1.4;
-    min-height: 44px;
-    min-width: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .new-chat-btn:hover { background: var(--border); }
-  .new-chat-btn:active { opacity: 0.7; transform: scale(0.96); }
-  .new-chat-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .theme-toggle {
-    background: none;
     border: none;
-    color: var(--toggle-text);
-    font-size: 20px;
+    color: var(--text);
     cursor: pointer;
     padding: 4px;
     line-height: 1;
@@ -121,8 +102,31 @@ export const html = `<!DOCTYPE html>
     display: flex;
     align-items: center;
     justify-content: center;
+    opacity: 0.75;
+    transition: opacity 0.15s;
   }
+  .new-chat-btn:hover { opacity: 1; }
+  .new-chat-btn:active { opacity: 0.7; transform: scale(0.9); }
+  .new-chat-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .new-chat-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .theme-toggle {
+    background: none;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.75;
+    transition: opacity 0.15s;
+  }
+  .theme-toggle:hover { opacity: 1; }
   .theme-toggle:active { opacity: 0.7; transform: scale(0.9); }
+  .theme-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .status-dot {
     width: 10px; height: 10px;
     border-radius: 50%;
@@ -592,8 +596,10 @@ export const html = `<!DOCTYPE html>
   /* Desktop overrides */
   @media (min-width: 768px) {
     #status-bar { padding: 8px 16px; font-size: 12px; }
-    .new-chat-btn { font-size: 11px; padding: 4px 10px; min-height: 32px; }
-    .theme-toggle { font-size: 16px; min-height: 32px; min-width: 32px; }
+    .new-chat-btn { min-height: 32px; min-width: 32px; }
+    .new-chat-btn svg { width: 16px; height: 16px; }
+    .theme-toggle { min-height: 32px; min-width: 32px; }
+    .theme-toggle svg { width: 16px; height: 16px; }
     .status-dot { width: 8px; height: 8px; }
     #messages { padding: 16px; gap: 12px; }
     .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
@@ -806,7 +812,7 @@ function App() {
   const [streaming, setStreaming] = useState(false);
   const [activity, setActivity] = useState(null);
   const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
-  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system");
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
   const [permissionQueue, setPermissionQueue] = useState([]);
   const [view, setView] = useState(() => getCurrentSessionId() ? "chat" : "picker");
   const [sessionsList, setSessionsList] = useState([]);
@@ -831,12 +837,12 @@ function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.classList.remove("light", "dark");
-    if (theme !== "system") root.classList.add(theme);
+    root.classList.add(theme);
     localStorage.setItem("theme", theme);
   }, [theme]);
 
   const cycleTheme = useCallback(() => {
-    setTheme(t => t === "system" ? "light" : t === "light" ? "dark" : "system");
+    setTheme(t => t === "light" ? "dark" : "light");
   }, []);
 
   const startPing = useCallback((ws) => {
@@ -1115,9 +1121,7 @@ function App() {
         <div id="status-bar">
           <div className={"status-dot" + (connected ? " connected" : "")} />
           <span>{connected ? "Connected" : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
-          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} style={{ marginLeft: "auto" }}>
-            {theme === "light" ? "\u2600\uFE0F" : theme === "dark" ? "\uD83C\uDF19" : "\uD83D\uDCBB"}
-          </button>
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} style={{ marginLeft: "auto" }} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
         </div>
         <div className="session-picker">
           <div className="session-picker-header">
@@ -1150,10 +1154,8 @@ function App() {
         <span>{connected ? (streaming ? "Streaming..." : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
         <button className="sessions-btn" onClick={showDiffs}>Diffs</button>
         <button className="sessions-btn" onClick={showPicker} disabled={streaming}>Sessions</button>
-        <button className="new-chat-btn" onClick={newChat} disabled={streaming}>New Chat</button>
-        <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme}>
-          {theme === "light" ? "\u2600\uFE0F" : theme === "dark" ? "\uD83C\uDF19" : "\uD83D\uDCBB"}
-        </button>
+        <button className="new-chat-btn" onClick={newChat} disabled={streaming} title="New Chat" dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' }} />
+        <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
       </div>
       <div id="messages">
         {messages.map((msg, i) => (
