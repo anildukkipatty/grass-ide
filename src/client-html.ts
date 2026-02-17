@@ -438,6 +438,59 @@ export const html = `<!DOCTYPE html>
   }
   .sessions-btn:hover { background: var(--border); }
   .sessions-btn:active { opacity: 0.7; transform: scale(0.96); }
+  /* Diff view */
+  .diff-view {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+  }
+  .diff-file {
+    margin: 0 16px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-file-header {
+    position: sticky;
+    top: 0;
+    background: var(--bar-bg);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+    font-size: 13px;
+    font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+    font-weight: 600;
+    z-index: 1;
+  }
+  .diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .diff-table td { padding: 0 8px; white-space: pre; }
+  .diff-line-num {
+    width: 1px;
+    text-align: right;
+    color: var(--badge-text);
+    user-select: none;
+    padding: 0 6px !important;
+    opacity: 0.6;
+  }
+  .diff-line-add { background: rgba(46,160,67,0.15); }
+  .diff-line-add td:last-child { color: #3fb950; }
+  .diff-line-del { background: rgba(248,81,73,0.15); }
+  .diff-line-del td:last-child { color: #f85149; }
+  .diff-line-hunk { background: rgba(56,139,253,0.1); }
+  .diff-line-hunk td { color: var(--badge-text); font-style: italic; }
+  .diff-empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--badge-text);
+    font-size: 15px;
+  }
   /* Markdown content inside messages */
   .msg .md-content { white-space: normal; }
   .msg .md-content p { margin: 0 0 8px 0; }
@@ -661,6 +714,90 @@ function formatPermissionInput(toolName, input) {
   }
 }
 
+function parseDiff(raw) {
+  if (!raw || !raw.trim()) return [];
+  const files = [];
+  const fileSections = raw.split(/^diff --git /m).filter(Boolean);
+  for (const section of fileSections) {
+    const lines = section.split("\\n");
+    // Extract filename from "a/path b/path"
+    const headerMatch = lines[0].match(/a\\/(.*?)\\s+b\\/(.*)/);
+    const filename = headerMatch ? headerMatch[2] : lines[0];
+    const parsedLines = [];
+    let oldLine = 0, newLine = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith("@@")) {
+        const hunkMatch = line.match(/@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
+        if (hunkMatch) {
+          oldLine = parseInt(hunkMatch[1], 10);
+          newLine = parseInt(hunkMatch[2], 10);
+        }
+        parsedLines.push({ type: "hunk", content: line, oldNum: "", newNum: "" });
+      } else if (line.startsWith("+")) {
+        parsedLines.push({ type: "add", content: line.slice(1), oldNum: "", newNum: newLine });
+        newLine++;
+      } else if (line.startsWith("-")) {
+        parsedLines.push({ type: "del", content: line.slice(1), oldNum: oldLine, newNum: "" });
+        oldLine++;
+      } else if (line.startsWith(" ")) {
+        parsedLines.push({ type: "ctx", content: line.slice(1), oldNum: oldLine, newNum: newLine });
+        oldLine++;
+        newLine++;
+      } else if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("index ") || line.startsWith("new file") || line.startsWith("deleted file") || line.startsWith("old mode") || line.startsWith("new mode") || line.startsWith("similarity") || line.startsWith("rename") || line.startsWith("Binary")) {
+        // skip meta lines
+      }
+    }
+    if (parsedLines.length > 0) {
+      files.push({ filename, lines: parsedLines });
+    }
+  }
+  return files;
+}
+
+function getExtFromFilename(filename) {
+  const ext = filename.split(".").pop();
+  const map = { ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", py: "python", rb: "ruby", rs: "rust", go: "go", java: "java", json: "json", md: "markdown", css: "css", html: "xml", yml: "yaml", yaml: "yaml", sh: "bash", bash: "bash", zsh: "bash" };
+  return map[ext] || ext;
+}
+
+function DiffView({ files, onBack }) {
+  return React.createElement(React.Fragment, null,
+    React.createElement("div", { id: "status-bar" },
+      React.createElement("button", { className: "new-chat-btn", onClick: onBack }, "\\u2190 Back"),
+      React.createElement("span", { style: { fontWeight: 600 } }, "Diffs"),
+      React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, color: "var(--badge-text)" } }, files.length + " file" + (files.length !== 1 ? "s" : ""))
+    ),
+    React.createElement("div", { className: "diff-view" },
+      files.length === 0
+        ? React.createElement("div", { className: "diff-empty" }, "No changes detected")
+        : files.map((file, fi) => {
+            const lang = getExtFromFilename(file.filename);
+            return React.createElement("div", { key: fi, className: "diff-file" },
+              React.createElement("div", { className: "diff-file-header" }, file.filename),
+              React.createElement("table", { className: "diff-table" },
+                React.createElement("tbody", null,
+                  file.lines.map((ln, li) => {
+                    const cls = ln.type === "add" ? "diff-line-add" : ln.type === "del" ? "diff-line-del" : ln.type === "hunk" ? "diff-line-hunk" : "";
+                    let highlighted = ln.content;
+                    if (ln.type !== "hunk" && lang && typeof hljs !== "undefined" && hljs.getLanguage(lang)) {
+                      try { highlighted = hljs.highlight(ln.content, { language: lang }).value; } catch {}
+                    }
+                    const prefix = ln.type === "add" ? "+" : ln.type === "del" ? "-" : " ";
+                    return React.createElement("tr", { key: li, className: cls },
+                      React.createElement("td", { className: "diff-line-num" }, ln.oldNum),
+                      React.createElement("td", { className: "diff-line-num" }, ln.newNum),
+                      React.createElement("td", { dangerouslySetInnerHTML: { __html: (ln.type === "hunk" ? ln.content : prefix + highlighted) } })
+                    );
+                  })
+                )
+              )
+            );
+          })
+    )
+  );
+}
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -674,6 +811,7 @@ function App() {
   const [view, setView] = useState(() => getCurrentSessionId() ? "chat" : "picker");
   const [sessionsList, setSessionsList] = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const [diffFiles, setDiffFiles] = useState([]);
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -782,6 +920,11 @@ function App() {
         if (data.type === "sessions_list") {
           setSessionsList(data.sessions || []);
           setLoadingSessions(false);
+          return;
+        }
+
+        if (data.type === "diffs") {
+          setDiffFiles(parseDiff(data.diff || ""));
           return;
         }
 
@@ -929,6 +1072,13 @@ function App() {
     }
   }, []);
 
+  const showDiffs = useCallback(() => {
+    setView("diffs");
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "get_diffs" }));
+    }
+  }, []);
+
   const respondPermission = useCallback((approved) => {
     if (permissionQueue.length === 0 || !wsRef.current) return;
     const current = permissionQueue[0];
@@ -954,6 +1104,10 @@ function App() {
   }, []);
 
   const disabled = !connected || streaming;
+
+  if (view === "diffs") {
+    return React.createElement(DiffView, { files: diffFiles, onBack: () => setView("chat") });
+  }
 
   if (view === "picker") {
     return (
@@ -994,6 +1148,7 @@ function App() {
       <div id="status-bar">
         <div className={"status-dot" + (connected ? " connected" : "")} />
         <span>{connected ? (streaming ? "Streaming..." : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+        <button className="sessions-btn" onClick={showDiffs}>Diffs</button>
         <button className="sessions-btn" onClick={showPicker} disabled={streaming}>Sessions</button>
         <button className="new-chat-btn" onClick={newChat} disabled={streaming}>New Chat</button>
         <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme}>

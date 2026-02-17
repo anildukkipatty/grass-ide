@@ -5,6 +5,7 @@ import { readdir } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
 import { homedir } from "os";
+import { execSync } from "child_process";
 
 const PORT = 3000;
 const IDLE_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
@@ -96,6 +97,18 @@ export async function start() {
       if (parsed.type === "list_sessions") {
         const sessionList = await listSessions(cwd);
         ws.send(JSON.stringify({ type: "sessions_list", sessions: sessionList }));
+        return;
+      }
+
+      // Handle get_diffs request
+      if (parsed.type === "get_diffs") {
+        let diff = "";
+        try {
+          diff = execSync("git diff HEAD", { cwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+        } catch {
+          diff = "";
+        }
+        ws.send(JSON.stringify({ type: "diffs", diff }));
         return;
       }
 
