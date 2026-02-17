@@ -77,95 +77,75 @@ function getLocalIP(): string {
   return "localhost";
 }
 
+function getPublicIP(): Promise<string | null> {
+  return new Promise((resolve) => {
+    http.get("http://api.ipify.org", (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => resolve(data.trim() || null));
+      res.on("error", () => resolve(null));
+    }).on("error", () => resolve(null));
+  });
+}
+
 function getTailscaleIP(): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile("tailscale", ["ip", "-4"], { timeout: 2000 }, (err, stdout) => {
+    // Check if Tailscale is actually running and connected
+    execFile("tailscale", ["status"], { timeout: 2000 }, (err) => {
       if (err) return resolve(null);
-      const ip = stdout.trim().split("\n")[0];
-      resolve(ip || null);
+      // Status succeeded, now get the IP
+      execFile("tailscale", ["ip", "-4"], { timeout: 2000 }, (err, stdout) => {
+        if (err) return resolve(null);
+        const ip = stdout.trim().split("\n")[0];
+        resolve(ip || null);
+      });
     });
   });
 }
 
-async function showQR(): Promise<void> {
-  const ip = getLocalIP();
-  const tsIP = await getTailscaleIP();
+async function showQR(network: string): Promise<void> {
+  let ip: string;
+  let label: string;
 
-  const urls: { label: string; url: string }[] = [
-    { label: "My Local Network", url: `http://${ip}:${PORT}` },
-  ];
-  if (tsIP) {
-    urls.push({ label: "Tailscale", url: `http://${tsIP}:${PORT}` });
+  if (network === "tailscale") {
+    const tsIP = await getTailscaleIP();
+    if (!tsIP) {
+      console.error("  Tailscale IP not found. Is Tailscale running?");
+      process.exit(1);
+    }
+    ip = tsIP;
+    label = "Tailscale";
+  } else if (network === "remote-ip") {
+    const publicIP = await getPublicIP();
+    if (!publicIP) {
+      console.error("  Could not determine public IP address.");
+      process.exit(1);
+    }
+    ip = publicIP;
+    label = "Public";
+  } else if (network === "local") {
+    ip = getLocalIP();
+    label = "Local Network";
+  } else {
+    // Treat as a literal IP/hostname
+    ip = network;
+    label = "Custom";
   }
 
-  // Pre-generate all QR codes
-  const qrCodes: string[] = await Promise.all(
-    urls.map(
-      (u) =>
-        new Promise<string>((resolve) => {
-          qrcode.generate(u.url, { small: true }, (code: string) => {
-            resolve(code.trimEnd());
-          });
-        })
-    )
-  );
+  const url = `http://${ip}:${PORT}`;
 
-  // Print header
-  const headerLines = [
-    "",
-    ...urls.map((u) => `  ${u.label.padEnd(9)}  ${u.url}`),
-    "",
-  ];
-  for (const line of headerLines) console.log(line);
+  console.log(`\n  ${label}  ${url}\n`);
 
-  // QR cycling state
-  let qrIdx = urls.length > 1 ? 1 : 0;
-  let qrLineCount = 0;
-
-  function renderQR() {
-    const hint = urls.length > 1 ? " (\u2191\u2193 to switch)" : "";
-    const label = `  QR: ${urls[qrIdx].label}${hint}`;
-    const block = `${label}\n${qrCodes[qrIdx]}`;
-    const lines = block.split("\n");
-
-    // Move cursor up to overwrite previous QR block
-    if (qrLineCount > 0) {
-      process.stdout.write(`\x1b[${qrLineCount}A`);
-    }
-    for (const line of lines) {
-      process.stdout.write(`\r${line}\x1b[K\n`);
-    }
-    // Clear leftover lines if previous block was taller
-    for (let i = lines.length; i < qrLineCount; i++) {
-      process.stdout.write(`\r\x1b[K\n`);
-    }
-    qrLineCount = Math.max(lines.length, qrLineCount);
-  }
-
-  renderQR();
-
-  // Listen for arrow keys
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.on("data", (key: Buffer) => {
-      const s = key.toString();
-      if (s === "\x03") {
-        process.emit("SIGINT" as any);
-        return;
-      }
-      if (s === "\x1b[A") {
-        qrIdx = (qrIdx - 1 + urls.length) % urls.length;
-        renderQR();
-      } else if (s === "\x1b[B") {
-        qrIdx = (qrIdx + 1) % urls.length;
-        renderQR();
-      }
+  const qrCode = await new Promise<string>((resolve) => {
+    qrcode.generate(url, { small: true }, (code: string) => {
+      resolve(code.trimEnd());
     });
-  }
+  });
+
+  console.log(qrCode);
 }
 
-export async function start() {
+export async function start(network: string = "local") {
   const cwd = process.cwd();
   console.log(`Starting grass server...`);
   console.log(`  cwd:  ${cwd}`);
@@ -179,7 +159,7 @@ export async function start() {
   const wss = new WebSocketServer({ server });
 
   server.listen(PORT, async () => {
-    await showQR();
+    await showQR(network);
   });
 
   wss.on("connection", (ws) => {
@@ -477,9 +457,6 @@ export async function start() {
   // Graceful shutdown
   const shutdown = () => {
     console.log("\nShutting down...");
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
-    }
     // Abort all running queries
     for (const [, ms] of sessions) {
       if (ms.abortController) ms.abortController.abort();
