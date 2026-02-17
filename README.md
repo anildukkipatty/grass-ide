@@ -294,4 +294,4 @@ Please keep changes focused and avoid unnecessary refactoring. If you're unsure 
 
 ## License
 
-ISC
+MIT — see [LICENSE](LICENSE) for details.

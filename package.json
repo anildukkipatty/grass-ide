@@ -22,7 +22,7 @@
     "websocket"
   ],
   "author": "anildukkipatty",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.42",
