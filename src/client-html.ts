@@ -670,7 +670,7 @@ function App() {
   const [activity, setActivity] = useState(null);
   const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system");
-  const [permissionRequest, setPermissionRequest] = useState(null);
+  const [permissionQueue, setPermissionQueue] = useState([]);
   const [view, setView] = useState(() => getCurrentSessionId() ? "chat" : "picker");
   const [sessionsList, setSessionsList] = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -758,8 +758,7 @@ function App() {
       ws.onclose = () => {
         clearTimeout(connectTimeout);
         setConnected(false);
-        setStreaming(false);
-        setPermissionRequest(null);
+        setPermissionQueue([]);
         stopPing();
         const delay = reconnectDelayRef.current;
         reconnectDelayRef.current = Math.min(delay * 2, 30000);
@@ -786,11 +785,23 @@ function App() {
           return;
         }
 
+        if (data.type === "session_status") {
+          setStreaming(data.streaming);
+          if (data.streaming) {
+            setActivity({ label: "Working..." });
+          }
+          return;
+        }
+
         if (data.type === "permission_request") {
-          setPermissionRequest({
-            toolUseID: data.toolUseID,
-            toolName: data.toolName,
-            input: data.input,
+          setPermissionQueue(prev => {
+            // Deduplicate by toolUseID
+            if (prev.some(p => p.toolUseID === data.toolUseID)) return prev;
+            return [...prev, {
+              toolUseID: data.toolUseID,
+              toolName: data.toolName,
+              input: data.input,
+            }];
           });
           return;
         }
@@ -885,7 +896,7 @@ function App() {
   const abort = useCallback(() => {
     if (!connected || !streaming) return;
     wsRef.current.send(JSON.stringify({ type: "abort" }));
-    setPermissionRequest(null);
+    setPermissionQueue([]);
   }, [connected, streaming]);
 
   const newChat = useCallback(() => {
@@ -919,14 +930,15 @@ function App() {
   }, []);
 
   const respondPermission = useCallback((approved) => {
-    if (!permissionRequest || !wsRef.current) return;
+    if (permissionQueue.length === 0 || !wsRef.current) return;
+    const current = permissionQueue[0];
     wsRef.current.send(JSON.stringify({
       type: "permission_response",
-      toolUseID: permissionRequest.toolUseID,
+      toolUseID: current.toolUseID,
       approved,
     }));
-    setPermissionRequest(null);
-  }, [permissionRequest]);
+    setPermissionQueue(prev => prev.slice(1));
+  }, [permissionQueue]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1023,13 +1035,13 @@ function App() {
           </button>
         )}
       </div>
-      {permissionRequest && (
+      {permissionQueue.length > 0 && (
         <div className="permission-overlay">
           <div className="permission-card">
-            <h3>Permission Request</h3>
-            <div className="tool-name">Tool: {permissionRequest.toolName}</div>
+            <h3>Permission Request{permissionQueue.length > 1 ? " (1 of " + permissionQueue.length + ")" : ""}</h3>
+            <div className="tool-name">Tool: {permissionQueue[0].toolName}</div>
             <div className="permission-body">
-              <MarkdownContent content={formatPermissionInput(permissionRequest.toolName, permissionRequest.input)} />
+              <MarkdownContent content={formatPermissionInput(permissionQueue[0].toolName, permissionQueue[0].input)} />
             </div>
             <div className="permission-actions">
               <button className="deny-btn" onClick={() => respondPermission(false)}>Deny</button>

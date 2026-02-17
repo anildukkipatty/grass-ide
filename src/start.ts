@@ -7,6 +7,59 @@ import { join } from "path";
 import { homedir } from "os";
 
 const PORT = 3000;
+const IDLE_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
+
+interface ManagedSession {
+  sessionId: string;
+  connectedSocket: WebSocket | null;
+  streaming: boolean;
+  msgSeq: number;
+  abortController: AbortController | null;
+  pendingPermissions: Map<string, { resolve: (result: any) => void; input: any; toolName: string; toolUseID: string }>;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+}
+
+const sessions = new Map<string, ManagedSession>();
+
+function getOrCreateManagedSession(sessionId: string): ManagedSession {
+  let ms = sessions.get(sessionId);
+  if (!ms) {
+    ms = {
+      sessionId,
+      connectedSocket: null,
+      streaming: false,
+      msgSeq: 0,
+      abortController: null,
+      pendingPermissions: new Map(),
+      idleTimer: null,
+    };
+    sessions.set(sessionId, ms);
+  }
+  clearIdleTimer(ms);
+  return ms;
+}
+
+function clearIdleTimer(ms: ManagedSession) {
+  if (ms.idleTimer) {
+    clearTimeout(ms.idleTimer);
+    ms.idleTimer = null;
+  }
+}
+
+function startIdleTimer(ms: ManagedSession) {
+  clearIdleTimer(ms);
+  ms.idleTimer = setTimeout(() => {
+    console.log(`[idle] Cleaning up session ${ms.sessionId} after ${IDLE_CLEANUP_MS / 1000}s idle`);
+    sessions.delete(ms.sessionId);
+  }, IDLE_CLEANUP_MS);
+}
+
+function safeSend(ms: ManagedSession, payload: Record<string, unknown>) {
+  const ws = ms.connectedSocket;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
+  }
+}
 
 export async function start() {
   const cwd = process.cwd();
@@ -21,14 +74,11 @@ export async function start() {
   wss.on("connection", (ws) => {
     console.log("Client connected");
 
-    let streaming = false;
-    let msgSeq = 0;
-    let abortController: AbortController | null = null;
-    let sessionId: string | null = null;
-    const pendingPermissions = new Map<string, { resolve: (result: any) => void; input: any }>();
+    // Track which managed session this socket is attached to
+    let attachedSessionId: string | null = null;
 
     ws.on("message", async (raw) => {
-      let parsed: { type: string; content?: string; sessionId?: string };
+      let parsed: { type: string; content?: string; sessionId?: string; [key: string]: any };
       try {
         parsed = JSON.parse(raw.toString());
       } catch {
@@ -44,34 +94,42 @@ export async function start() {
 
       // Handle list_sessions request
       if (parsed.type === "list_sessions") {
-        const sessions = await listSessions(cwd);
-        ws.send(JSON.stringify({ type: "sessions_list", sessions }));
+        const sessionList = await listSessions(cwd);
+        ws.send(JSON.stringify({ type: "sessions_list", sessions: sessionList }));
         return;
       }
 
       // Handle abort signal
       if (parsed.type === "abort") {
-        if (streaming && abortController) {
-          abortController.abort();
-          console.log("Client requested abort");
+        if (attachedSessionId) {
+          const ms = sessions.get(attachedSessionId);
+          if (ms && ms.streaming && ms.abortController) {
+            ms.abortController.abort();
+            console.log("Client requested abort");
+          }
         }
         return;
       }
 
       // Handle permission response from client
       if (parsed.type === "permission_response") {
-        const { toolUseID, approved } = parsed as any;
+        const { toolUseID, approved } = parsed;
         console.log(`[permission_response] id=${toolUseID} approved=${approved}`);
-        const pending = pendingPermissions.get(toolUseID);
-        if (pending) {
-          pendingPermissions.delete(toolUseID);
-          console.log(`[permission_response] resolving with behavior=${approved ? "allow" : "deny"}`);
-          pending.resolve(approved
-            ? { behavior: "allow", updatedInput: pending.input }
-            : { behavior: "deny", message: "User denied" }
-          );
-        } else {
-          console.log(`[permission_response] no resolver found for ${toolUseID}`);
+        if (attachedSessionId) {
+          const ms = sessions.get(attachedSessionId);
+          if (ms) {
+            const pending = ms.pendingPermissions.get(toolUseID);
+            if (pending) {
+              ms.pendingPermissions.delete(toolUseID);
+              console.log(`[permission_response] resolving with behavior=${approved ? "allow" : "deny"}`);
+              pending.resolve(approved
+                ? { behavior: "allow", updatedInput: pending.input }
+                : { behavior: "deny", message: "User denied" }
+              );
+            } else {
+              console.log(`[permission_response] no resolver found for ${toolUseID}`);
+            }
+          }
         }
         return;
       }
@@ -79,11 +137,52 @@ export async function start() {
       // Handle init — client sends sessionId to resume
       if (parsed.type === "init") {
         if (parsed.sessionId && typeof parsed.sessionId === "string") {
-          sessionId = parsed.sessionId;
+          const sessionId = parsed.sessionId;
           console.log("Client requested session resume:", sessionId);
+
+          // Detach from previous session if switching
+          if (attachedSessionId && attachedSessionId !== sessionId) {
+            const oldMs = sessions.get(attachedSessionId);
+            if (oldMs && oldMs.connectedSocket === ws) {
+              oldMs.connectedSocket = null;
+              if (!oldMs.streaming) startIdleTimer(oldMs);
+            }
+          }
+
+          attachedSessionId = sessionId;
+
+          // Attach socket to managed session (if it exists)
+          const ms = sessions.get(sessionId);
+          if (ms) {
+            // Disconnect previous client on this session (last one wins)
+            if (ms.connectedSocket && ms.connectedSocket !== ws && ms.connectedSocket.readyState === WebSocket.OPEN) {
+              ms.connectedSocket.send(JSON.stringify({ type: "error", message: "Another client connected to this session" }));
+              ms.connectedSocket.close();
+            }
+            ms.connectedSocket = ws;
+            clearIdleTimer(ms);
+          }
+
+          // Load and send transcript history
           const history = await loadTranscript(sessionId, cwd);
           if (history.length > 0) {
             ws.send(JSON.stringify({ type: "history", messages: history }));
+          }
+
+          // Send session status so client knows if a query is running
+          const streaming = ms?.streaming ?? false;
+          ws.send(JSON.stringify({ type: "session_status", streaming, sessionId }));
+
+          // Flush any pending permission requests
+          if (ms) {
+            for (const [id, pending] of ms.pendingPermissions) {
+              ws.send(JSON.stringify({
+                type: "permission_request",
+                toolUseID: id,
+                toolName: pending.toolName,
+                input: pending.input,
+              }));
+            }
           }
         }
         return;
@@ -99,18 +198,36 @@ export async function start() {
         return;
       }
 
-      if (streaming) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "Already processing a message, wait for result",
-          })
-        );
-        return;
+      // Check if already streaming on this session
+      if (attachedSessionId) {
+        const ms = sessions.get(attachedSessionId);
+        if (ms && ms.streaming) {
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              message: "Already processing a message, wait for result",
+            })
+          );
+          return;
+        }
       }
 
-      streaming = true;
-      abortController = new AbortController();
+      // Start query — create or reuse managed session
+      const sessionId = attachedSessionId; // may be null for new session
+      const abortController = new AbortController();
+
+      // We'll get the real session ID from the init message, but need a placeholder MS
+      // For now, create a temporary reference that we'll update
+      let ms: ManagedSession | null = null;
+      if (sessionId) {
+        ms = getOrCreateManagedSession(sessionId);
+      }
+
+      if (ms) {
+        ms.streaming = true;
+        ms.abortController = abortController;
+        ms.connectedSocket = ws;
+      }
 
       try {
         console.log("[query] starting with permissionMode=default + canUseTool");
@@ -125,29 +242,28 @@ export async function start() {
             canUseTool: (toolName, input, { signal, toolUseID, decisionReason }) => {
               console.log(`[canUseTool] tool=${toolName} id=${toolUseID} reason=${decisionReason}`);
               return new Promise((resolve) => {
-                // If connection is gone, deny
-                if (ws.readyState !== WebSocket.OPEN) {
-                  console.log(`[canUseTool] denying — client disconnected`);
-                  resolve({ behavior: "deny", message: "Client disconnected" });
+                if (!ms) {
+                  // Session not yet initialized, deny
+                  resolve({ behavior: "deny", message: "Session not ready" });
                   return;
                 }
 
-                // Store resolver and input
-                pendingPermissions.set(toolUseID, { resolve, input });
+                // Store resolver with tool info for reconnect
+                ms.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
 
-                // Send permission request to client
-                ws.send(JSON.stringify({
+                // Send to client if connected
+                safeSend(ms, {
                   type: "permission_request",
                   toolUseID,
                   toolName,
                   input,
-                }));
+                });
 
                 // If aborted, clean up and deny
                 signal.addEventListener("abort", () => {
-                  const p = pendingPermissions.get(toolUseID);
+                  const p = ms!.pendingPermissions.get(toolUseID);
                   if (p) {
-                    pendingPermissions.delete(toolUseID);
+                    ms!.pendingPermissions.delete(toolUseID);
                     p.resolve({ behavior: "deny", message: "Request aborted" });
                   }
                 }, { once: true });
@@ -158,33 +274,38 @@ export async function start() {
 
         try {
           for await (const msg of q) {
-            if (ws.readyState !== WebSocket.OPEN) break;
-
             // Capture session ID from init message
             if (msg.type === "system" && msg.subtype === "init") {
-              sessionId = (msg as any).session_id ?? sessionId;
+              const newSessionId = (msg as any).session_id;
+              if (newSessionId && !ms) {
+                // First time seeing session ID — create managed session
+                ms = getOrCreateManagedSession(newSessionId);
+                ms.streaming = true;
+                ms.abortController = abortController;
+                ms.connectedSocket = ws;
+                attachedSessionId = newSessionId;
+              }
             }
 
-            const payload = formatMessage(msg, msgSeq);
+            if (!ms) continue;
+
+            const payload = formatMessage(msg, ms.msgSeq);
             if (payload) {
               const items = Array.isArray(payload) ? payload : [payload];
               for (const item of items) {
-                if (item.type === "assistant") msgSeq++;
-                ws.send(JSON.stringify(item));
+                if (item.type === "assistant") ms.msgSeq++;
+                safeSend(ms, item as Record<string, unknown>);
               }
             }
           }
         } catch (err: any) {
-          console.log("[query] inner error:", err?.message, err?.stack);
           if (err?.name === "AbortError" || abortController.signal.aborted) {
-            console.log("Request aborted successfully");
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(
-                JSON.stringify({
-                  type: "aborted",
-                  message: "Request aborted by user",
-                })
-              );
+            console.log("[query] aborted");
+            if (ms) {
+              safeSend(ms, {
+                type: "aborted",
+                message: "Request aborted by user",
+              });
             }
           } else {
             throw err;
@@ -192,29 +313,52 @@ export async function start() {
         }
       } catch (err: any) {
         console.log("[query] outer error:", err?.message, err?.stack);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              message: err?.message ?? "Unknown error",
-            })
-          );
+        if (ms) {
+          safeSend(ms, {
+            type: "error",
+            message: err?.message ?? "Unknown error",
+          });
         }
       } finally {
-        streaming = false;
-        abortController = null;
+        if (ms) {
+          ms.streaming = false;
+          ms.abortController = null;
+          // Clear any stale pending permissions so they don't get flushed on reconnect
+          ms.pendingPermissions.clear();
+          // If no client connected, start idle cleanup
+          if (!ms.connectedSocket || ms.connectedSocket.readyState !== WebSocket.OPEN) {
+            startIdleTimer(ms);
+          }
+        }
       }
     });
 
     ws.on("close", () => {
       console.log("Client disconnected");
-      if (abortController) abortController.abort();
+      // Detach socket but do NOT abort the query
+      if (attachedSessionId) {
+        const ms = sessions.get(attachedSessionId);
+        if (ms && ms.connectedSocket === ws) {
+          ms.connectedSocket = null;
+          // If not streaming, start idle cleanup
+          if (!ms.streaming) {
+            startIdleTimer(ms);
+          }
+          // If streaming, query continues headlessly — no abort
+          console.log(`Session ${attachedSessionId} detached (streaming=${ms.streaming})`);
+        }
+      }
     });
   });
 
   // Graceful shutdown
   const shutdown = () => {
     console.log("\nShutting down...");
+    // Abort all running queries
+    for (const [, ms] of sessions) {
+      if (ms.abortController) ms.abortController.abort();
+      clearIdleTimer(ms);
+    }
     wss.clients.forEach((ws) => ws.close());
     wss.close(() => {
       process.exit(0);
@@ -427,7 +571,7 @@ async function listSessions(
     const files = await readdir(projectDir);
     const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
 
-    const sessions = await Promise.all(
+    const sessionList = await Promise.all(
       jsonlFiles.map(async (f) => {
         const id = f.replace(/\.jsonl$/, "");
         const preview = await getSessionPreview(join(projectDir, f));
@@ -435,7 +579,7 @@ async function listSessions(
       })
     );
 
-    return sessions;
+    return sessionList;
   } catch (err: any) {
     console.error("Error listing sessions:", err.message);
     return [];
