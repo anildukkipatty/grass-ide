@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createReadStream, existsSync } from "fs";
+import { readdir } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
 import { homedir } from "os";
@@ -38,6 +39,13 @@ export async function start() {
       // Handle ping from client
       if (parsed.type === "ping") {
         ws.send(JSON.stringify({ type: "pong" }));
+        return;
+      }
+
+      // Handle list_sessions request
+      if (parsed.type === "list_sessions") {
+        const sessions = await listSessions(cwd);
+        ws.send(JSON.stringify({ type: "sessions_list", sessions }));
         return;
       }
 
@@ -364,6 +372,72 @@ async function loadTranscript(
     return messages;
   } catch (err: any) {
     console.error("Error reading transcript:", err.message);
+    return [];
+  }
+}
+
+async function getSessionPreview(filePath: string): Promise<string> {
+  try {
+    const rl = createInterface({
+      input: createReadStream(filePath, { encoding: "utf-8" }),
+      crlfDelay: Infinity,
+    });
+
+    for await (const line of rl) {
+      if (!line) continue;
+      let entry: any;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      // Look for the first user message or assistant message with real content
+      if (entry.type === "user" && entry.userType === "external" && !entry.isMeta) {
+        const text = extractText(entry.message?.content).trim();
+        if (text) {
+          rl.close();
+          return text.length > 80 ? text.slice(0, 80) + "..." : text;
+        }
+      }
+      if (entry.type === "assistant") {
+        const text = extractText(entry.message?.content).trim();
+        if (text) {
+          rl.close();
+          return text.length > 80 ? text.slice(0, 80) + "..." : text;
+        }
+      }
+    }
+
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+async function listSessions(
+  cwd: string
+): Promise<{ id: string; preview: string }[]> {
+  const encodedCwd = cwd.replace(/\//g, "-");
+  const projectDir = join(homedir(), ".claude", "projects", encodedCwd);
+
+  if (!existsSync(projectDir)) return [];
+
+  try {
+    const files = await readdir(projectDir);
+    const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
+
+    const sessions = await Promise.all(
+      jsonlFiles.map(async (f) => {
+        const id = f.replace(/\.jsonl$/, "");
+        const preview = await getSessionPreview(join(projectDir, f));
+        return { id, preview };
+      })
+    );
+
+    return sessions;
+  } catch (err: any) {
+    console.error("Error listing sessions:", err.message);
     return [];
   }
 }

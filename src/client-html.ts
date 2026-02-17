@@ -91,7 +91,6 @@ export const html = `<!DOCTYPE html>
     gap: 10px;
   }
   .new-chat-btn {
-    margin-left: auto;
     background: none;
     border: 1px solid var(--border);
     color: var(--text);
@@ -331,6 +330,95 @@ export const html = `<!DOCTYPE html>
     color: var(--text);
   }
   .permission-actions .deny-btn:hover { background: var(--border); }
+  /* Session picker */
+  .session-picker {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+  }
+  .session-picker-header {
+    padding: 16px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .session-picker-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+    flex: 1;
+  }
+  .session-picker-new-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-family: inherit;
+    min-height: 44px;
+  }
+  .session-picker-new-btn:hover { background: var(--accent-hover); }
+  .session-picker-new-btn:active { opacity: 0.8; transform: scale(0.96); }
+  .session-list {
+    list-style: none;
+    padding: 0 16px 16px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .session-item {
+    padding: 14px 16px;
+    background: var(--msg-assistant-bg);
+    border: 1px solid var(--msg-assistant-border);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .session-item:hover { background: var(--bar-bg); }
+  .session-item:active { opacity: 0.7; transform: scale(0.98); }
+  .session-item-preview {
+    font-size: 14px;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .session-item-id {
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--badge-text);
+    margin-top: 4px;
+    word-break: break-all;
+  }
+  .session-empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--badge-text);
+    font-size: 15px;
+  }
+  .sessions-btn {
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 6px 14px;
+    border-radius: 8px;
+    line-height: 1.4;
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sessions-btn:hover { background: var(--border); }
+  .sessions-btn:active { opacity: 0.7; transform: scale(0.96); }
   /* Desktop overrides */
   @media (min-width: 768px) {
     #status-bar { padding: 8px 16px; font-size: 12px; }
@@ -347,6 +435,14 @@ export const html = `<!DOCTYPE html>
     #input-bar button { border-radius: 8px; width: auto; height: auto; min-width: unset; min-height: unset; padding: 0 20px; font-size: 14px; }
     .activity-bar { padding: 6px 16px; font-size: 12px; min-height: 28px; }
     .activity-bar .dot-pulse span { width: 4px; height: 4px; }
+    .session-picker-header { padding: 12px 16px; }
+    .session-picker-header h2 { font-size: 16px; }
+    .session-picker-new-btn { font-size: 12px; padding: 6px 14px; min-height: 32px; }
+    .session-list { padding: 0 16px 16px; gap: 4px; }
+    .session-item { padding: 10px 14px; border-radius: 8px; }
+    .session-item-preview { font-size: 13px; }
+    .session-item-id { font-size: 10px; }
+    .sessions-btn { font-size: 11px; padding: 4px 10px; min-height: 32px; }
   }
 </style>
 </head>
@@ -415,6 +511,9 @@ function App() {
   const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system");
   const [permissionRequest, setPermissionRequest] = useState(null);
+  const [view, setView] = useState(() => getCurrentSessionId() ? "chat" : "picker");
+  const [sessionsList, setSessionsList] = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -485,8 +584,14 @@ function App() {
         setReconnecting(false);
         reconnectDelayRef.current = 1000;
         startPing(ws);
+        // Always request session list
+        setLoadingSessions(true);
+        ws.send(JSON.stringify({ type: "list_sessions" }));
+        // If we have a current session, init it
         const sid = getCurrentSessionId();
-        ws.send(JSON.stringify({ type: "init", sessionId: sid }));
+        if (sid) {
+          ws.send(JSON.stringify({ type: "init", sessionId: sid }));
+        }
         setTimeout(() => textareaRef.current?.focus(), 0);
       };
 
@@ -512,6 +617,12 @@ function App() {
 
         if (data.type === "pong") {
           clearTimeout(pongTimeoutRef.current);
+          return;
+        }
+
+        if (data.type === "sessions_list") {
+          setSessionsList(data.sessions || []);
+          setLoadingSessions(false);
           return;
         }
 
@@ -622,7 +733,29 @@ function App() {
     setSessionId(null);
     setMessages([]);
     setActivity(null);
+    setView("chat");
     if (wsRef.current) wsRef.current.close();
+  }, []);
+
+  const selectSession = useCallback((id) => {
+    setCurrentSessionId(id);
+    setSessionId(id);
+    setMessages([]);
+    setActivity(null);
+    setView("chat");
+    // Send init to load history for this session
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "init", sessionId: id }));
+    }
+  }, []);
+
+  const showPicker = useCallback(() => {
+    setView("picker");
+    // Re-fetch session list
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setLoadingSessions(true);
+      wsRef.current.send(JSON.stringify({ type: "list_sessions" }));
+    }
   }, []);
 
   const respondPermission = useCallback((approved) => {
@@ -650,11 +783,46 @@ function App() {
 
   const disabled = !connected || streaming;
 
+  if (view === "picker") {
+    return (
+      <>
+        <div id="status-bar">
+          <div className={"status-dot" + (connected ? " connected" : "")} />
+          <span>{connected ? "Connected" : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} style={{ marginLeft: "auto" }}>
+            {theme === "light" ? "\u2600\uFE0F" : theme === "dark" ? "\uD83C\uDF19" : "\uD83D\uDCBB"}
+          </button>
+        </div>
+        <div className="session-picker">
+          <div className="session-picker-header">
+            <h2>Sessions</h2>
+            <button className="session-picker-new-btn" onClick={newChat}>+ New Chat</button>
+          </div>
+          {loadingSessions ? (
+            <div className="session-empty">Loading sessions...</div>
+          ) : sessionsList.length === 0 ? (
+            <div className="session-empty">No previous sessions found. Start a new chat!</div>
+          ) : (
+            <ul className="session-list">
+              {sessionsList.map((s) => (
+                <li key={s.id} className="session-item" onClick={() => selectSession(s.id)}>
+                  <div className="session-item-preview">{s.preview || "Empty session"}</div>
+                  <div className="session-item-id">{s.id}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <div id="status-bar">
         <div className={"status-dot" + (connected ? " connected" : "")} />
         <span>{connected ? (streaming ? "Streaming..." : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+        <button className="sessions-btn" onClick={showPicker} disabled={streaming}>Sessions</button>
         <button className="new-chat-btn" onClick={newChat} disabled={streaming}>New Chat</button>
         <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme}>
           {theme === "light" ? "\u2600\uFE0F" : theme === "dark" ? "\uD83C\uDF19" : "\uD83D\uDCBB"}
