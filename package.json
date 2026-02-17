@@ -1,17 +1,27 @@
 {
-  "name": "grass",
-  "version": "1.0.0",
-  "description": "Grass CLI",
+  "name": "@grass-ai/ide",
+  "version": "0.1.0",
+  "description": "CLI that bridges clients to Claude agents via the Claude Agent SDK",
   "main": "dist/index.js",
   "bin": {
     "grass": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "claude",
+    "ai",
+    "agent",
+    "cli",
+    "websocket"
+  ],
+  "author": "anildukkipatty",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
@@ -20,7 +30,6 @@
     "cli-progress": "^3.12.0",
     "commander": "^14.0.3",
     "qrcode-terminal": "^0.12.0",
-    "typescript": "^5.9.3",
     "ws": "^8.19.0"
   },
   "devDependencies": {
@@ -28,6 +37,7 @@
     "@types/node": "^25.2.3",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.18.1",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }
