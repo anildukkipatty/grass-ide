@@ -295,17 +295,36 @@ export const html = `<!DOCTYPE html>
     font-size: 13px;
     color: var(--badge-text);
   }
-  .permission-card pre {
-    background: var(--bar-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px;
-    font-size: 13px;
+  .permission-body {
     overflow: auto;
     max-height: 300px;
-    white-space: pre-wrap;
-    word-wrap: break-word;
+    font-size: 13px;
   }
+  .permission-body .md-content pre {
+    margin: 8px 0;
+    border-radius: 8px;
+    overflow-x: auto;
+    background: #1e1e2e;
+    border: 1px solid var(--border);
+  }
+  .permission-body .md-content pre code {
+    display: block;
+    padding: 12px;
+    background: none;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre;
+    border-radius: 0;
+  }
+  .permission-body .md-content code {
+    font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: rgba(0,0,0,0.08);
+    padding: 2px 5px;
+    border-radius: 4px;
+  }
+  .permission-body .md-content p { margin: 0 0 8px 0; }
+  .permission-body .md-content p:last-child { margin-bottom: 0; }
   .permission-actions {
     display: flex;
     gap: 8px;
@@ -490,31 +509,31 @@ export const html = `<!DOCTYPE html>
     margin: 10px 0;
   }
   .msg .md-content img { max-width: 100%; border-radius: 6px; }
-  /* highlight.js — inline github-dark colors with enough specificity to beat .msg.assistant */
-  .msg .md-content pre code.hljs { background: none; padding: 12px; color: #c9d1d9; }
-  .msg .md-content pre code .hljs-keyword,
-  .msg .md-content pre code .hljs-selector-tag,
-  .msg .md-content pre code .hljs-literal,
-  .msg .md-content pre code .hljs-section,
-  .msg .md-content pre code .hljs-link { color: #ff7b72; }
-  .msg .md-content pre code .hljs-string,
-  .msg .md-content pre code .hljs-addition,
-  .msg .md-content pre code .hljs-regexp { color: #a5d6ff; }
-  .msg .md-content pre code .hljs-title,
-  .msg .md-content pre code .hljs-type,
-  .msg .md-content pre code .hljs-built_in,
-  .msg .md-content pre code .hljs-selector-id,
-  .msg .md-content pre code .hljs-selector-class { color: #d2a8ff; }
-  .msg .md-content pre code .hljs-attr,
-  .msg .md-content pre code .hljs-variable,
-  .msg .md-content pre code .hljs-template-variable,
-  .msg .md-content pre code .hljs-number,
-  .msg .md-content pre code .hljs-meta { color: #79c0ff; }
-  .msg .md-content pre code .hljs-comment,
-  .msg .md-content pre code .hljs-quote,
-  .msg .md-content pre code .hljs-deletion { color: #8b949e; }
-  .msg .md-content pre code .hljs-name { color: #7ee787; }
-  .msg .md-content pre code .hljs-subst { color: #c9d1d9; }
+  /* highlight.js — inline github-dark colors */
+  .md-content pre code.hljs { background: none; padding: 12px; color: #c9d1d9; }
+  .md-content pre code .hljs-keyword,
+  .md-content pre code .hljs-selector-tag,
+  .md-content pre code .hljs-literal,
+  .md-content pre code .hljs-section,
+  .md-content pre code .hljs-link { color: #ff7b72; }
+  .md-content pre code .hljs-string,
+  .md-content pre code .hljs-addition,
+  .md-content pre code .hljs-regexp { color: #a5d6ff; }
+  .md-content pre code .hljs-title,
+  .md-content pre code .hljs-type,
+  .md-content pre code .hljs-built_in,
+  .md-content pre code .hljs-selector-id,
+  .md-content pre code .hljs-selector-class { color: #d2a8ff; }
+  .md-content pre code .hljs-attr,
+  .md-content pre code .hljs-variable,
+  .md-content pre code .hljs-template-variable,
+  .md-content pre code .hljs-number,
+  .md-content pre code .hljs-meta { color: #79c0ff; }
+  .md-content pre code .hljs-comment,
+  .md-content pre code .hljs-quote,
+  .md-content pre code .hljs-deletion { color: #8b949e; }
+  .md-content pre code .hljs-name { color: #7ee787; }
+  .md-content pre code .hljs-subst { color: #c9d1d9; }
   /* Desktop overrides */
   @media (min-width: 768px) {
     #status-bar { padding: 8px 16px; font-size: 12px; }
@@ -626,13 +645,13 @@ function addOrUpdateSession(id) {
 function formatPermissionInput(toolName, input) {
   switch (toolName) {
     case "Write":
-      return "File: " + input.file_path + "\\n\\nContent (" + (input.content || "").length + " chars):\\n" + (input.content || "").slice(0, 500) + ((input.content || "").length > 500 ? "\\n..." : "");
+      return "**File:** \`" + input.file_path + "\`\\n\\nContent (" + (input.content || "").length + " chars):\\n\\n\`\`\`\\n" + (input.content || "").slice(0, 500) + ((input.content || "").length > 500 ? "\\n..." : "") + "\\n\`\`\`";
     case "Edit":
-      return "File: " + input.file_path + "\\n\\nReplace:\\n" + (input.old_string || "").slice(0, 300) + "\\n\\nWith:\\n" + (input.new_string || "").slice(0, 300);
+      return "**File:** \`" + input.file_path + "\`\\n\\n**Replace:**\\n\`\`\`\\n" + (input.old_string || "").slice(0, 300) + "\\n\`\`\`\\n\\n**With:**\\n\`\`\`\\n" + (input.new_string || "").slice(0, 300) + "\\n\`\`\`";
     case "Bash":
-      return "Command:\\n" + (input.command || "");
+      return "**Command:**\\n\`\`\`bash\\n" + (input.command || "") + "\\n\`\`\`";
     default:
-      return JSON.stringify(input, null, 2);
+      return "\`\`\`json\\n" + JSON.stringify(input, null, 2) + "\\n\`\`\`";
   }
 }
 
@@ -1003,7 +1022,9 @@ function App() {
           <div className="permission-card">
             <h3>Permission Request</h3>
             <div className="tool-name">Tool: {permissionRequest.toolName}</div>
-            <pre>{formatPermissionInput(permissionRequest.toolName, permissionRequest.input)}</pre>
+            <div className="permission-body">
+              <MarkdownContent content={formatPermissionInput(permissionRequest.toolName, permissionRequest.input)} />
+            </div>
             <div className="permission-actions">
               <button className="deny-btn" onClick={() => respondPermission(false)}>Deny</button>
               <button className="allow-btn" onClick={() => respondPermission(true)}>Allow</button>
