@@ -4,8 +4,11 @@ import { createReadStream, existsSync } from "fs";
 import { readdir } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
-import { homedir } from "os";
-import { execSync } from "child_process";
+import { homedir, networkInterfaces } from "os";
+import { execSync, execFile } from "child_process";
+import http from "node:http";
+import qrcode from "qrcode-terminal";
+import { html } from "./client-html";
 
 const PORT = 3000;
 const IDLE_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
@@ -62,15 +65,122 @@ function safeSend(ms: ManagedSession, payload: Record<string, unknown>) {
   }
 }
 
+function getLocalIP(): string {
+  const nets = networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]!) {
+      if (net.family === "IPv4" && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return "localhost";
+}
+
+function getTailscaleIP(): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile("tailscale", ["ip", "-4"], { timeout: 2000 }, (err, stdout) => {
+      if (err) return resolve(null);
+      const ip = stdout.trim().split("\n")[0];
+      resolve(ip || null);
+    });
+  });
+}
+
+async function showQR(): Promise<void> {
+  const ip = getLocalIP();
+  const tsIP = await getTailscaleIP();
+
+  const urls: { label: string; url: string }[] = [
+    { label: "My Local Network", url: `http://${ip}:${PORT}` },
+  ];
+  if (tsIP) {
+    urls.push({ label: "Tailscale", url: `http://${tsIP}:${PORT}` });
+  }
+
+  // Pre-generate all QR codes
+  const qrCodes: string[] = await Promise.all(
+    urls.map(
+      (u) =>
+        new Promise<string>((resolve) => {
+          qrcode.generate(u.url, { small: true }, (code: string) => {
+            resolve(code.trimEnd());
+          });
+        })
+    )
+  );
+
+  // Print header
+  const headerLines = [
+    "",
+    ...urls.map((u) => `  ${u.label.padEnd(9)}  ${u.url}`),
+    "",
+  ];
+  for (const line of headerLines) console.log(line);
+
+  // QR cycling state
+  let qrIdx = urls.length > 1 ? 1 : 0;
+  let qrLineCount = 0;
+
+  function renderQR() {
+    const hint = urls.length > 1 ? " (\u2191\u2193 to switch)" : "";
+    const label = `  QR: ${urls[qrIdx].label}${hint}`;
+    const block = `${label}\n${qrCodes[qrIdx]}`;
+    const lines = block.split("\n");
+
+    // Move cursor up to overwrite previous QR block
+    if (qrLineCount > 0) {
+      process.stdout.write(`\x1b[${qrLineCount}A`);
+    }
+    for (const line of lines) {
+      process.stdout.write(`\r${line}\x1b[K\n`);
+    }
+    // Clear leftover lines if previous block was taller
+    for (let i = lines.length; i < qrLineCount; i++) {
+      process.stdout.write(`\r\x1b[K\n`);
+    }
+    qrLineCount = Math.max(lines.length, qrLineCount);
+  }
+
+  renderQR();
+
+  // Listen for arrow keys
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("data", (key: Buffer) => {
+      const s = key.toString();
+      if (s === "\x03") {
+        process.emit("SIGINT" as any);
+        return;
+      }
+      if (s === "\x1b[A") {
+        qrIdx = (qrIdx - 1 + urls.length) % urls.length;
+        renderQR();
+      } else if (s === "\x1b[B") {
+        qrIdx = (qrIdx + 1) % urls.length;
+        renderQR();
+      }
+    });
+  }
+}
+
 export async function start() {
   const cwd = process.cwd();
   console.log(`Starting grass server...`);
   console.log(`  cwd:  ${cwd}`);
   console.log(`  port: ${PORT}`);
 
-  const wss = new WebSocketServer({ port: PORT });
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
+  });
 
-  console.log(`\nListening on ws://localhost:${PORT}`);
+  const wss = new WebSocketServer({ server });
+
+  server.listen(PORT, async () => {
+    await showQR();
+  });
 
   wss.on("connection", (ws) => {
     console.log("Client connected");
@@ -367,13 +477,17 @@ export async function start() {
   // Graceful shutdown
   const shutdown = () => {
     console.log("\nShutting down...");
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
     // Abort all running queries
     for (const [, ms] of sessions) {
       if (ms.abortController) ms.abortController.abort();
       clearIdleTimer(ms);
     }
     wss.clients.forEach((ws) => ws.close());
-    wss.close(() => {
+    wss.close();
+    server.close(() => {
       process.exit(0);
     });
   };

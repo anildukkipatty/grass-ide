@@ -871,7 +871,7 @@ function App() {
     function connect() {
       clearTimeout(reconnectTimeoutRef.current);
       clearTimeout(connectTimeout);
-      let ws = new WebSocket(\`ws://\${window.location.hostname}:3000\`);
+      let ws = new WebSocket(\`ws://\${window.location.host}\`);
       wsRef.current = ws;
 
       // If the upgrade doesn't complete within 5s, kill and retry
