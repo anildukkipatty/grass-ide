@@ -21,6 +21,10 @@
     "cli",
     "websocket"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anildukkipatty/grass-ide.git"
+  },
   "author": "anildukkipatty",
   "license": "MIT",
   "type": "commonjs",

@@ -2,6 +2,8 @@
 
 <img src="assets/logo.png" alt="Grass" width="500" />
 
+[![npm version](https://img.shields.io/npm/v/@grass-ai/ide)](https://www.npmjs.com/package/@grass-ai/ide)
+
 # grass
 
 **Claude on your phone. Code on your machine.**
