@@ -35,8 +35,9 @@ program
   .command("start")
   .description("Start a WebSocket server for Claude agent interaction")
   .option("-n, --network <type>", "network for QR code: local, tailscale, or remote-ip", "local")
+  .option("-p, --port <number>", "port to listen on (default: auto-select from 32100–32199)", parseInt)
   .action(async (opts) => {
-    await start(opts.network);
+    await start(opts.network, opts.port);
   });
 
 program.parse();

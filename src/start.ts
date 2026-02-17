@@ -10,8 +10,26 @@ import http from "node:http";
 import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
 
-const PORT = 3000;
+const PORT_RANGE_START = 32100;
+const PORT_RANGE_END = 32199;
 const IDLE_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
+
+function findAvailablePort(startPort: number, endPort: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const tryPort = (port: number) => {
+      if (port > endPort) {
+        reject(new Error(`No available port found in range ${startPort}–${endPort}`));
+        return;
+      }
+      const server = http.createServer();
+      server.listen(port, () => {
+        server.close(() => resolve(port));
+      });
+      server.on("error", () => tryPort(port + 1));
+    };
+    tryPort(startPort);
+  });
+}
 
 interface ManagedSession {
   sessionId: string;
@@ -103,7 +121,7 @@ function getTailscaleIP(): Promise<string | null> {
   });
 }
 
-async function showQR(network: string): Promise<void> {
+async function showQR(network: string, port: number): Promise<void> {
   let ip: string;
   let label: string;
 
@@ -132,7 +150,7 @@ async function showQR(network: string): Promise<void> {
     label = "Custom";
   }
 
-  const url = `http://${ip}:${PORT}`;
+  const url = `http://${ip}:${port}`;
 
   console.log(`\n  ${label}  ${url}\n`);
 
@@ -145,11 +163,25 @@ async function showQR(network: string): Promise<void> {
   console.log(qrCode);
 }
 
-export async function start(network: string = "local") {
+export async function start(network: string = "local", portOverride?: number) {
   const cwd = process.cwd();
   console.log(`Starting grass server...`);
   console.log(`  cwd:  ${cwd}`);
-  console.log(`  port: ${PORT}`);
+
+  let PORT: number;
+  if (portOverride !== undefined) {
+    PORT = portOverride;
+    console.log(`  port: ${PORT} (specified)`);
+  } else {
+    try {
+      PORT = await findAvailablePort(PORT_RANGE_START, PORT_RANGE_END);
+      console.log(`  port: ${PORT} (auto-selected from ${PORT_RANGE_START}–${PORT_RANGE_END})`);
+    } catch {
+      console.error(`\n  No available port found in range ${PORT_RANGE_START}–${PORT_RANGE_END}.`);
+      console.error(`  Try stopping other grass sessions, or run with -p to specify a port.\n`);
+      process.exit(1);
+    }
+  }
 
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -158,8 +190,21 @@ export async function start(network: string = "local") {
 
   const wss = new WebSocketServer({ server });
 
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`\n  Port ${PORT} is not available.`);
+      if (portOverride !== undefined) {
+        console.error(`  Please choose a different port with -p, or run without -p to auto-select one.\n`);
+      } else {
+        console.error(`  Try stopping other grass sessions, or run with -p to specify a port.\n`);
+      }
+      process.exit(1);
+    }
+    throw err;
+  });
+
   server.listen(PORT, async () => {
-    await showQR(network);
+    await showQR(network, PORT);
   });
 
   wss.on("connection", (ws) => {
