@@ -2,7 +2,7 @@ export const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>grass client</title>
 <style>
   :root {
@@ -73,91 +73,122 @@ export const html = `<!DOCTYPE html>
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
     height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
   }
+  /* Status bar — mobile-first */
   #status-bar {
-    padding: 8px 16px;
-    font-size: 12px;
+    padding: 12px 16px;
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+    font-size: 13px;
     background: var(--bar-bg);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
   .new-chat-btn {
     margin-left: auto;
     background: none;
     border: 1px solid var(--border);
     color: var(--text);
-    font-size: 11px;
+    font-size: 13px;
     cursor: pointer;
-    padding: 2px 8px;
-    border-radius: 4px;
+    padding: 6px 14px;
+    border-radius: 8px;
     line-height: 1.4;
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .new-chat-btn:hover { background: var(--border); }
+  .new-chat-btn:active { opacity: 0.7; transform: scale(0.96); }
   .new-chat-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .theme-toggle {
     background: none;
     border: none;
     color: var(--toggle-text);
-    font-size: 16px;
+    font-size: 20px;
     cursor: pointer;
-    padding: 2px 4px;
+    padding: 4px;
     line-height: 1;
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
+  .theme-toggle:active { opacity: 0.7; transform: scale(0.9); }
   .status-dot {
-    width: 8px; height: 8px;
+    width: 10px; height: 10px;
     border-radius: 50%;
     background: #e74c3c;
+    flex-shrink: 0;
   }
   .status-dot.connected { background: #2ecc71; }
+  /* Messages area */
   #messages {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 12px;
+    padding-left: calc(12px + env(safe-area-inset-left, 0px));
+    padding-right: calc(12px + env(safe-area-inset-right, 0px));
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
   .msg {
-    max-width: 80%;
-    padding: 10px 14px;
-    border-radius: 8px;
+    max-width: 90%;
+    padding: 12px 16px;
+    border-radius: 16px;
     line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
-    font-size: 14px;
+    font-size: 15px;
   }
   .msg.user {
     align-self: flex-end;
     background: var(--msg-user-bg);
     color: var(--msg-user-text);
+    border-radius: 16px 16px 4px 16px;
   }
   .msg.assistant {
     align-self: flex-start;
     background: var(--msg-assistant-bg);
     color: var(--msg-assistant-text);
     border: 1px solid var(--msg-assistant-border);
+    border-radius: 16px 16px 16px 4px;
   }
   .msg.error {
     align-self: center;
     background: var(--msg-error-bg);
     color: var(--msg-error-text);
     border: 1px solid var(--msg-error-border);
-    font-size: 13px;
+    font-size: 14px;
+    border-radius: 12px;
   }
   .badge {
     font-size: 11px;
     color: var(--badge-text);
     margin-top: 4px;
   }
+  /* Input bar — mobile-first */
   #input-bar {
-    padding: 12px 16px;
+    padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(12px + env(safe-area-inset-left, 0px));
+    padding-right: calc(12px + env(safe-area-inset-right, 0px));
     background: var(--bar-bg);
     border-top: 1px solid var(--border);
     display: flex;
+    align-items: flex-end;
     gap: 8px;
   }
   #input-bar textarea {
@@ -165,14 +196,15 @@ export const html = `<!DOCTYPE html>
     background: var(--input-bg);
     color: var(--input-text);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 12px;
-    font-size: 14px;
+    border-radius: 20px;
+    padding: 12px 16px;
+    font-size: 16px;
     font-family: inherit;
     resize: none;
     outline: none;
-    min-height: 42px;
+    min-height: 48px;
     max-height: 120px;
+    overflow-y: auto;
   }
   #input-bar textarea:focus { border-color: var(--accent); }
   #input-bar textarea:disabled { opacity: 0.5; }
@@ -180,13 +212,21 @@ export const html = `<!DOCTYPE html>
     background: var(--accent);
     color: #fff;
     border: none;
-    border-radius: 6px;
-    padding: 0 20px;
-    font-size: 14px;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    font-size: 20px;
     cursor: pointer;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex-shrink: 0;
   }
   #input-bar button:hover { background: var(--accent-hover); }
+  #input-bar button:active { opacity: 0.8; transform: scale(0.93); }
   #input-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
   #input-bar button.abort {
     background: #e74c3c;
@@ -194,16 +234,18 @@ export const html = `<!DOCTYPE html>
   #input-bar button.abort:hover {
     background: #c0392b;
   }
+  /* Activity bar */
   .activity-bar {
-    padding: 6px 16px;
-    font-size: 12px;
+    padding: 8px 16px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    font-size: 13px;
     color: var(--badge-text);
     background: var(--bar-bg);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 6px;
-    min-height: 28px;
+    gap: 8px;
+    min-height: 32px;
   }
   .activity-bar .dot-pulse {
     display: inline-flex;
@@ -211,8 +253,8 @@ export const html = `<!DOCTYPE html>
     align-items: center;
   }
   .activity-bar .dot-pulse span {
-    width: 4px;
-    height: 4px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: var(--accent);
     animation: pulse 1.2s ease-in-out infinite;
@@ -222,6 +264,23 @@ export const html = `<!DOCTYPE html>
   @keyframes pulse {
     0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
     40% { opacity: 1; transform: scale(1); }
+  }
+  /* Desktop overrides */
+  @media (min-width: 768px) {
+    #status-bar { padding: 8px 16px; font-size: 12px; }
+    .new-chat-btn { font-size: 11px; padding: 4px 10px; min-height: 32px; }
+    .theme-toggle { font-size: 16px; min-height: 32px; min-width: 32px; }
+    .status-dot { width: 8px; height: 8px; }
+    #messages { padding: 16px; gap: 12px; }
+    .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
+    .msg.user { border-radius: 12px 12px 4px 12px; }
+    .msg.assistant { border-radius: 12px 12px 12px 4px; }
+    .msg.error { font-size: 13px; }
+    #input-bar { padding: 12px 16px; }
+    #input-bar textarea { font-size: 14px; min-height: 42px; border-radius: 8px; padding: 10px 12px; }
+    #input-bar button { border-radius: 8px; width: auto; height: auto; min-width: unset; min-height: unset; padding: 0 20px; font-size: 14px; }
+    .activity-bar { padding: 6px 16px; font-size: 12px; min-height: 28px; }
+    .activity-bar .dot-pulse span { width: 4px; height: 4px; }
   }
 </style>
 </head>
@@ -457,6 +516,7 @@ function App() {
     setMessages(prev => [...prev, { role: "user", content: text }]);
     wsRef.current.send(JSON.stringify({ type: "message", content: text }));
     setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     setStreaming(true);
     setActivity({ label: "Thinking" });
   }, [input, connected, streaming]);
@@ -480,6 +540,12 @@ function App() {
       send();
     }
   }, [send]);
+
+  const autoResize = useCallback((el) => {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 120) + "px";
+  }, []);
 
   const disabled = !connected || streaming;
 
@@ -512,19 +578,19 @@ function App() {
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={e => { setInput(e.target.value); autoResize(e.target); }}
           onKeyDown={handleKeyDown}
           placeholder="Type a message..."
           rows={1}
           disabled={disabled}
         />
         {streaming ? (
-          <button onClick={abort} className="abort">
-            Abort
+          <button onClick={abort} className="abort" aria-label="Abort">
+            \u25A0
           </button>
         ) : (
-          <button onClick={send} disabled={disabled || !input.trim()}>
-            Send
+          <button onClick={send} disabled={disabled || !input.trim()} aria-label="Send">
+            \u2191
           </button>
         )}
       </div>

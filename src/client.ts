@@ -39,8 +39,7 @@ export async function client() {
     const tsIP = await getTailscaleIP();
 
     const urls: { label: string; url: string }[] = [
-      { label: "Local", url: `http://localhost:${PORT}` },
-      { label: "Network", url: `http://${ip}:${PORT}` },
+      { label: "My Local Network", url: `http://${ip}:${PORT}` },
     ];
     if (tsIP) {
       urls.push({ label: "Tailscale", url: `http://${tsIP}:${PORT}` });
@@ -69,7 +68,7 @@ export async function client() {
     for (const line of headerLines) console.log(line);
 
     // QR cycling state
-    let qrIdx = urls.length > 2 ? 2 : 1;
+    let qrIdx = urls.length > 1 ? 1 : 0;
     let qrLineCount = 0;
 
     function renderQR() {
