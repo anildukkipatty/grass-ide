@@ -89,7 +89,7 @@ export async function start() {
         const q = query({
           prompt: parsed.content,
           options: {
-            model: "claude-sonnet-4-5-20250929",
+            model: "claude-opus-4-6",
             permissionMode: "bypassPermissions",
             abortController,
             includePartialMessages: true,
