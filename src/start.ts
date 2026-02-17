@@ -24,6 +24,7 @@ export async function start() {
     let msgSeq = 0;
     let abortController: AbortController | null = null;
     let sessionId: string | null = null;
+    const pendingPermissions = new Map<string, { resolve: (result: any) => void; input: any }>();
 
     ws.on("message", async (raw) => {
       let parsed: { type: string; content?: string; sessionId?: string };
@@ -45,6 +46,24 @@ export async function start() {
         if (streaming && abortController) {
           abortController.abort();
           console.log("Client requested abort");
+        }
+        return;
+      }
+
+      // Handle permission response from client
+      if (parsed.type === "permission_response") {
+        const { toolUseID, approved } = parsed as any;
+        console.log(`[permission_response] id=${toolUseID} approved=${approved}`);
+        const pending = pendingPermissions.get(toolUseID);
+        if (pending) {
+          pendingPermissions.delete(toolUseID);
+          console.log(`[permission_response] resolving with behavior=${approved ? "allow" : "deny"}`);
+          pending.resolve(approved
+            ? { behavior: "allow", updatedInput: pending.input }
+            : { behavior: "deny", message: "User denied" }
+          );
+        } else {
+          console.log(`[permission_response] no resolver found for ${toolUseID}`);
         }
         return;
       }
@@ -86,14 +105,46 @@ export async function start() {
       abortController = new AbortController();
 
       try {
+        console.log("[query] starting with permissionMode=default + canUseTool");
         const q = query({
           prompt: parsed.content,
           options: {
             model: "claude-opus-4-6",
-            permissionMode: "bypassPermissions",
+            permissionMode: "default",
             abortController,
             includePartialMessages: true,
             ...(sessionId ? { resume: sessionId } : {}),
+            canUseTool: (toolName, input, { signal, toolUseID, decisionReason }) => {
+              console.log(`[canUseTool] tool=${toolName} id=${toolUseID} reason=${decisionReason}`);
+              return new Promise((resolve) => {
+                // If connection is gone, deny
+                if (ws.readyState !== WebSocket.OPEN) {
+                  console.log(`[canUseTool] denying — client disconnected`);
+                  resolve({ behavior: "deny", message: "Client disconnected" });
+                  return;
+                }
+
+                // Store resolver and input
+                pendingPermissions.set(toolUseID, { resolve, input });
+
+                // Send permission request to client
+                ws.send(JSON.stringify({
+                  type: "permission_request",
+                  toolUseID,
+                  toolName,
+                  input,
+                }));
+
+                // If aborted, clean up and deny
+                signal.addEventListener("abort", () => {
+                  const p = pendingPermissions.get(toolUseID);
+                  if (p) {
+                    pendingPermissions.delete(toolUseID);
+                    p.resolve({ behavior: "deny", message: "Request aborted" });
+                  }
+                }, { once: true });
+              });
+            },
           },
         });
 
@@ -116,6 +167,7 @@ export async function start() {
             }
           }
         } catch (err: any) {
+          console.log("[query] inner error:", err?.message, err?.stack);
           if (err?.name === "AbortError" || abortController.signal.aborted) {
             console.log("Request aborted successfully");
             if (ws.readyState === WebSocket.OPEN) {
@@ -131,6 +183,7 @@ export async function start() {
           }
         }
       } catch (err: any) {
+        console.log("[query] outer error:", err?.message, err?.stack);
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({

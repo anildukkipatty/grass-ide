@@ -265,6 +265,72 @@ export const html = `<!DOCTYPE html>
     0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
     40% { opacity: 1; transform: scale(1); }
   }
+  /* Permission modal */
+  .permission-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 16px;
+  }
+  .permission-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    max-width: 500px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .permission-card h3 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .permission-card .tool-name {
+    font-size: 13px;
+    color: var(--badge-text);
+  }
+  .permission-card pre {
+    background: var(--bar-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 13px;
+    overflow: auto;
+    max-height: 300px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .permission-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .permission-actions button {
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .permission-actions .allow-btn {
+    background: #2ecc71;
+    color: #fff;
+    border-color: #2ecc71;
+  }
+  .permission-actions .allow-btn:hover { background: #27ae60; }
+  .permission-actions .deny-btn {
+    background: none;
+    color: var(--text);
+  }
+  .permission-actions .deny-btn:hover { background: var(--border); }
   /* Desktop overrides */
   @media (min-width: 768px) {
     #status-bar { padding: 8px 16px; font-size: 12px; }
@@ -326,6 +392,19 @@ function addOrUpdateSession(id) {
   saveSessions(sessions);
 }
 
+function formatPermissionInput(toolName, input) {
+  switch (toolName) {
+    case "Write":
+      return "File: " + input.file_path + "\\n\\nContent (" + (input.content || "").length + " chars):\\n" + (input.content || "").slice(0, 500) + ((input.content || "").length > 500 ? "\\n..." : "");
+    case "Edit":
+      return "File: " + input.file_path + "\\n\\nReplace:\\n" + (input.old_string || "").slice(0, 300) + "\\n\\nWith:\\n" + (input.new_string || "").slice(0, 300);
+    case "Bash":
+      return "Command:\\n" + (input.command || "");
+    default:
+      return JSON.stringify(input, null, 2);
+  }
+}
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -335,6 +414,7 @@ function App() {
   const [activity, setActivity] = useState(null);
   const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system");
+  const [permissionRequest, setPermissionRequest] = useState(null);
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -414,6 +494,7 @@ function App() {
         clearTimeout(connectTimeout);
         setConnected(false);
         setStreaming(false);
+        setPermissionRequest(null);
         stopPing();
         const delay = reconnectDelayRef.current;
         reconnectDelayRef.current = Math.min(delay * 2, 30000);
@@ -431,6 +512,15 @@ function App() {
 
         if (data.type === "pong") {
           clearTimeout(pongTimeoutRef.current);
+          return;
+        }
+
+        if (data.type === "permission_request") {
+          setPermissionRequest({
+            toolUseID: data.toolUseID,
+            toolName: data.toolName,
+            input: data.input,
+          });
           return;
         }
 
@@ -524,6 +614,7 @@ function App() {
   const abort = useCallback(() => {
     if (!connected || !streaming) return;
     wsRef.current.send(JSON.stringify({ type: "abort" }));
+    setPermissionRequest(null);
   }, [connected, streaming]);
 
   const newChat = useCallback(() => {
@@ -533,6 +624,16 @@ function App() {
     setActivity(null);
     if (wsRef.current) wsRef.current.close();
   }, []);
+
+  const respondPermission = useCallback((approved) => {
+    if (!permissionRequest || !wsRef.current) return;
+    wsRef.current.send(JSON.stringify({
+      type: "permission_response",
+      toolUseID: permissionRequest.toolUseID,
+      approved,
+    }));
+    setPermissionRequest(null);
+  }, [permissionRequest]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -594,6 +695,19 @@ function App() {
           </button>
         )}
       </div>
+      {permissionRequest && (
+        <div className="permission-overlay">
+          <div className="permission-card">
+            <h3>Permission Request</h3>
+            <div className="tool-name">Tool: {permissionRequest.toolName}</div>
+            <pre>{formatPermissionInput(permissionRequest.toolName, permissionRequest.input)}</pre>
+            <div className="permission-actions">
+              <button className="deny-btn" onClick={() => respondPermission(false)}>Deny</button>
+              <button className="allow-btn" onClick={() => respondPermission(true)}>Allow</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
