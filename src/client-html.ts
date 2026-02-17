@@ -517,7 +517,6 @@ export const html = `<!DOCTYPE html>
   .md-content pre code .hljs-section,
   .md-content pre code .hljs-link { color: #ff7b72; }
   .md-content pre code .hljs-string,
-  .md-content pre code .hljs-addition,
   .md-content pre code .hljs-regexp { color: #a5d6ff; }
   .md-content pre code .hljs-title,
   .md-content pre code .hljs-type,
@@ -530,10 +529,13 @@ export const html = `<!DOCTYPE html>
   .md-content pre code .hljs-number,
   .md-content pre code .hljs-meta { color: #79c0ff; }
   .md-content pre code .hljs-comment,
-  .md-content pre code .hljs-quote,
-  .md-content pre code .hljs-deletion { color: #8b949e; }
+  .md-content pre code .hljs-quote { color: #8b949e; }
   .md-content pre code .hljs-name { color: #7ee787; }
   .md-content pre code .hljs-subst { color: #c9d1d9; }
+  /* Diff highlighting */
+  .md-content pre code .hljs-addition { color: #3fb950; background: rgba(46,160,67,0.15); display: inline-block; width: 100%; }
+  .md-content pre code .hljs-deletion { color: #f85149; background: rgba(248,81,73,0.15); display: inline-block; width: 100%; }
+  .md-content pre code.language-diff .hljs-meta { color: #79c0ff; font-weight: 600; }
   /* Desktop overrides */
   @media (min-width: 768px) {
     #status-bar { padding: 8px 16px; font-size: 12px; }
@@ -590,7 +592,11 @@ const markedInstance = new Marked(
   markedHighlight({
     emptyLangClass: "hljs",
     langPrefix: "hljs language-",
-    highlight(code, lang) {
+    highlight(code, lang, info) {
+      // Auto-detect unified diff format when no language is specified
+      if (!lang && /^(diff --git|---\\s|\\+\\+\\+\\s|@@\\s)/m.test(code)) {
+        lang = "diff";
+      }
       if (lang && hljs.getLanguage(lang)) {
         try { return hljs.highlight(code, { language: lang }).value; } catch {}
       }
