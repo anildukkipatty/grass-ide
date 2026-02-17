@@ -148,8 +148,8 @@ export const html = `<!DOCTYPE html>
     padding: 12px 16px;
     border-radius: 16px;
     line-height: 1.5;
-    white-space: pre-wrap;
     word-wrap: break-word;
+    overflow-wrap: break-word;
     font-size: 15px;
   }
   .msg.user {
@@ -419,6 +419,102 @@ export const html = `<!DOCTYPE html>
   }
   .sessions-btn:hover { background: var(--border); }
   .sessions-btn:active { opacity: 0.7; transform: scale(0.96); }
+  /* Markdown content inside messages */
+  .msg .md-content { white-space: normal; }
+  .msg .md-content p { margin: 0 0 8px 0; }
+  .msg .md-content p:last-child { margin-bottom: 0; }
+  .msg .md-content h1, .msg .md-content h2, .msg .md-content h3,
+  .msg .md-content h4, .msg .md-content h5, .msg .md-content h6 {
+    margin: 12px 0 6px 0;
+    line-height: 1.3;
+  }
+  .msg .md-content h1:first-child, .msg .md-content h2:first-child,
+  .msg .md-content h3:first-child { margin-top: 0; }
+  .msg .md-content ul, .msg .md-content ol {
+    margin: 4px 0 8px 0;
+    padding-left: 20px;
+  }
+  .msg .md-content li { margin-bottom: 2px; }
+  .msg .md-content blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 10px;
+    margin: 6px 0;
+    opacity: 0.85;
+  }
+  .msg .md-content code {
+    font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: rgba(0,0,0,0.08);
+    padding: 2px 5px;
+    border-radius: 4px;
+  }
+  .msg.user .md-content code {
+    background: rgba(255,255,255,0.15);
+  }
+  .msg .md-content pre {
+    margin: 8px 0;
+    border-radius: 8px;
+    overflow-x: auto;
+    background: #1e1e2e;
+    border: 1px solid var(--border);
+  }
+  .msg .md-content pre code {
+    display: block;
+    padding: 12px;
+    background: none;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre;
+    border-radius: 0;
+  }
+  .msg .md-content a {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .msg.user .md-content a { color: #aad4ff; }
+  .msg .md-content table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 0.9em;
+    width: 100%;
+  }
+  .msg .md-content th, .msg .md-content td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+  }
+  .msg .md-content th { background: rgba(0,0,0,0.05); font-weight: 600; }
+  .msg .md-content hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 10px 0;
+  }
+  .msg .md-content img { max-width: 100%; border-radius: 6px; }
+  /* highlight.js — inline github-dark colors with enough specificity to beat .msg.assistant */
+  .msg .md-content pre code.hljs { background: none; padding: 12px; color: #c9d1d9; }
+  .msg .md-content pre code .hljs-keyword,
+  .msg .md-content pre code .hljs-selector-tag,
+  .msg .md-content pre code .hljs-literal,
+  .msg .md-content pre code .hljs-section,
+  .msg .md-content pre code .hljs-link { color: #ff7b72; }
+  .msg .md-content pre code .hljs-string,
+  .msg .md-content pre code .hljs-addition,
+  .msg .md-content pre code .hljs-regexp { color: #a5d6ff; }
+  .msg .md-content pre code .hljs-title,
+  .msg .md-content pre code .hljs-type,
+  .msg .md-content pre code .hljs-built_in,
+  .msg .md-content pre code .hljs-selector-id,
+  .msg .md-content pre code .hljs-selector-class { color: #d2a8ff; }
+  .msg .md-content pre code .hljs-attr,
+  .msg .md-content pre code .hljs-variable,
+  .msg .md-content pre code .hljs-template-variable,
+  .msg .md-content pre code .hljs-number,
+  .msg .md-content pre code .hljs-meta { color: #79c0ff; }
+  .msg .md-content pre code .hljs-comment,
+  .msg .md-content pre code .hljs-quote,
+  .msg .md-content pre code .hljs-deletion { color: #8b949e; }
+  .msg .md-content pre code .hljs-name { color: #7ee787; }
+  .msg .md-content pre code .hljs-subst { color: #c9d1d9; }
   /* Desktop overrides */
   @media (min-width: 768px) {
     #status-bar { padding: 8px 16px; font-size: 12px; }
@@ -460,9 +556,48 @@ export const html = `<!DOCTYPE html>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked-highlight/lib/index.umd.js"></script>
+<script src="https://unpkg.com/@highlightjs/cdn-assets/highlight.min.js"></script>
 
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// Configure marked with highlight.js for code syntax highlighting
+const { Marked } = globalThis.marked;
+const { markedHighlight } = globalThis.markedHighlight;
+
+const markedInstance = new Marked(
+  markedHighlight({
+    emptyLangClass: "hljs",
+    langPrefix: "hljs language-",
+    highlight(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        try { return hljs.highlight(code, { language: lang }).value; } catch {}
+      }
+      try { return hljs.highlightAuto(code).value; } catch {}
+      return code;
+    },
+  })
+);
+markedInstance.setOptions({ breaks: true, gfm: true });
+
+function renderMarkdown(text) {
+  if (!text) return "";
+  try {
+    return markedInstance.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function MarkdownContent({ content }) {
+  const html = useMemo(() => renderMarkdown(content), [content]);
+  return React.createElement("div", {
+    className: "md-content",
+    dangerouslySetInnerHTML: { __html: html },
+  });
+}
 
 const SESSIONS_KEY = "grass_sessions";
 const CURRENT_KEY = "grass_current_session";
@@ -831,7 +966,7 @@ function App() {
       <div id="messages">
         {messages.map((msg, i) => (
           <div key={i} className={"msg " + msg.role}>
-            {msg.content}
+            <MarkdownContent content={msg.content} />
             {msg.badge && <div className="badge">{msg.badge}</div>}
           </div>
         ))}
