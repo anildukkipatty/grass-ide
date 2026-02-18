@@ -1,10 +1,10 @@
 {
   "name": "@grass-ai/ide",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI that bridges clients to Claude agents via the Claude Agent SDK",
   "main": "dist/index.js",
   "bin": {
-    "grass": "./dist/index.js"
+    "grass": "dist/index.js"
   },
   "files": [
     "dist"
@@ -23,7 +23,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/anildukkipatty/grass-ide.git"
+    "url": "git+https://github.com/anildukkipatty/grass-ide.git"
   },
   "author": "anildukkipatty",
   "license": "MIT",
