@@ -5,7 +5,7 @@ import { readdir } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
 import { homedir, networkInterfaces } from "os";
-import { execSync, execFile } from "child_process";
+import { execSync, execFile, spawn } from "child_process";
 import http from "node:http";
 import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
@@ -163,9 +163,37 @@ async function showQR(network: string, port: number): Promise<void> {
   console.log(qrCode);
 }
 
-export async function start(network: string = "local", portOverride?: number) {
+function maybeCaffeinate(enabled: boolean): number | null {
+  if (!enabled) return null;
+  try {
+    execSync("which caffeinate", { stdio: "ignore" });
+  } catch {
+    return null;
+  }
+  const hours = 8;
+  const seconds = hours * 60 * 60;
+  const child = spawn("caffeinate", ["-t", String(seconds)], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  console.log(`  caffeinate: running for ${hours}h (pid ${child.pid})`);
+  return child.pid ?? null;
+}
+
+function killCaffeinate(pid: number | null): void {
+  if (pid === null) return;
+  try {
+    process.kill(pid);
+  } catch {
+    // already gone
+  }
+}
+
+export async function start(network: string = "local", portOverride?: number, caffeinate: boolean = false) {
   const cwd = process.cwd();
   console.log(`Starting grass server...`);
+  const caffeinatePid = maybeCaffeinate(caffeinate);
   console.log(`  cwd:  ${cwd}`);
 
   let PORT: number;
@@ -502,6 +530,7 @@ export async function start(network: string = "local", portOverride?: number) {
   // Graceful shutdown
   const shutdown = () => {
     console.log("\nShutting down...");
+    killCaffeinate(caffeinatePid);
     // Abort all running queries
     for (const [, ms] of sessions) {
       if (ms.abortController) ms.abortController.abort();
@@ -516,6 +545,13 @@ export async function start(network: string = "local", portOverride?: number) {
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  process.on("exit", () => killCaffeinate(caffeinatePid));
+  process.on("uncaughtException", (err) => {
+    console.error("Uncaught exception:", err);
+    killCaffeinate(caffeinatePid);
+    process.exit(1);
+  });
 }
 
 function formatMessage(
