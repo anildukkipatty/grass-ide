@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createReadStream, existsSync } from "fs";
-import { readdir } from "fs/promises";
+import { readdir, stat } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
 import { homedir, networkInterfaces } from "os";
@@ -746,7 +746,7 @@ async function getSessionPreview(filePath: string): Promise<string> {
 
 async function listSessions(
   cwd: string
-): Promise<{ id: string; preview: string }[]> {
+): Promise<{ id: string; preview: string; updatedAt: string }[]> {
   const encodedCwd = cwd.replace(/\//g, "-");
   const projectDir = join(homedir(), ".claude", "projects", encodedCwd);
 
@@ -758,11 +758,17 @@ async function listSessions(
 
     const sessionList = await Promise.all(
       jsonlFiles.map(async (f) => {
+        const filePath = join(projectDir, f);
         const id = f.replace(/\.jsonl$/, "");
-        const preview = await getSessionPreview(join(projectDir, f));
-        return { id, preview };
+        const [preview, fileStat] = await Promise.all([
+          getSessionPreview(filePath),
+          stat(filePath),
+        ]);
+        return { id, preview, updatedAt: fileStat.mtime.toISOString() };
       })
     );
+
+    sessionList.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
     return sessionList;
   } catch (err: any) {
