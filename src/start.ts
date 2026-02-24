@@ -658,7 +658,7 @@ async function loadTranscript(
   sessionId: string,
   cwd: string
 ): Promise<{ role: string; content: string }[]> {
-  const encodedCwd = cwd.replace(/\//g, "-");
+  const encodedCwd = cwd.replace(/[/\\]/g, "-");
   const transcriptPath = join(
     homedir(),
     ".claude",
@@ -747,7 +747,7 @@ async function getSessionPreview(filePath: string): Promise<string> {
 async function listSessions(
   cwd: string
 ): Promise<{ id: string; preview: string; updatedAt: string }[]> {
-  const encodedCwd = cwd.replace(/\//g, "-");
+  const encodedCwd = cwd.replace(/[/\\]/g, "-");
   const projectDir = join(homedir(), ".claude", "projects", encodedCwd);
 
   if (!existsSync(projectDir)) return [];
