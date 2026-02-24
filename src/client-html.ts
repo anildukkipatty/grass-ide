@@ -460,26 +460,28 @@ export const html = `<!DOCTYPE html>
     -webkit-overflow-scrolling: touch;
     display: flex;
     flex-direction: column;
+    padding-top: 12px;
   }
   .diff-file {
     margin: 0 16px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    overflow: hidden;
+    overflow: clip;
+  }
+  .diff-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .diff-file-header {
-    position: sticky;
-    top: 0;
     background: var(--bar-bg);
     border-bottom: 1px solid var(--border);
     padding: 8px 12px;
     font-size: 13px;
     font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
     font-weight: 600;
-    z-index: 1;
   }
   .diff-table {
-    width: 100%;
+    min-width: 100%;
     border-collapse: collapse;
     font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
     font-size: 12px;
@@ -808,6 +810,7 @@ function DiffView({ files, onBack }) {
             const lang = getExtFromFilename(file.filename);
             return React.createElement("div", { key: fi, className: "diff-file" },
               React.createElement("div", { className: "diff-file-header" }, file.filename),
+              React.createElement("div", { className: "diff-table-scroll" },
               React.createElement("table", { className: "diff-table" },
                 React.createElement("tbody", null,
                   file.lines.map((ln, li) => {
@@ -824,6 +827,7 @@ function DiffView({ files, onBack }) {
                     );
                   })
                 )
+              )
               )
             );
           })
