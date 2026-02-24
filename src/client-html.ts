@@ -411,12 +411,23 @@ export const html = `<!DOCTYPE html>
     line-height: 1.4;
     word-break: break-word;
   }
+  .session-item-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .session-item-time {
+    font-size: 11px;
+    color: var(--badge-text);
+    white-space: nowrap;
+  }
   .session-item-id {
     font-size: 11px;
     font-family: monospace;
     color: var(--badge-text);
-    margin-top: 4px;
     word-break: break-all;
+    opacity: 0.6;
   }
   .session-empty {
     padding: 40px 16px;
@@ -705,6 +716,22 @@ function addOrUpdateSession(id) {
     sessions.push({ id, label: "Chat " + (sessions.length + 1), createdAt: now, updatedAt: now });
   }
   saveSessions(sessions);
+}
+
+function timeAgo(isoString) {
+  if (!isoString) return "";
+  const diff = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " min" + (mins === 1 ? "" : "s") + " ago";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + " hr" + (hrs === 1 ? "" : "s") + " ago";
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return days + " day" + (days === 1 ? "" : "s") + " ago";
+  const months = Math.floor(days / 30);
+  if (months < 12) return months + " month" + (months === 1 ? "" : "s") + " ago";
+  const years = Math.floor(months / 12);
+  return years + " year" + (years === 1 ? "" : "s") + " ago";
 }
 
 function formatPermissionInput(toolName, input) {
@@ -1137,7 +1164,10 @@ function App() {
               {sessionsList.map((s) => (
                 <li key={s.id} className="session-item" onClick={() => selectSession(s.id)}>
                   <div className="session-item-preview">{s.preview || "Empty session"}</div>
-                  <div className="session-item-id">{s.id}</div>
+                  <div className="session-item-meta">
+                    <span className="session-item-time">{timeAgo(s.updatedAt)}</span>
+                    <span className="session-item-id">{s.id}</span>
+                  </div>
                 </li>
               ))}
             </ul>
