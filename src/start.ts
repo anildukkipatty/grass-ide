@@ -718,6 +718,9 @@ async function getSessionPreview(filePath: string): Promise<string> {
       crlfDelay: Infinity,
     });
 
+    const parts: string[] = [];
+    let totalLen = 0;
+
     for await (const line of rl) {
       if (!line) continue;
       let entry: any;
@@ -727,24 +730,24 @@ async function getSessionPreview(filePath: string): Promise<string> {
         continue;
       }
 
-      // Look for the first user message or assistant message with real content
-      if (entry.type === "user" && entry.userType === "external" && !entry.isMeta) {
-        const text = extractText(entry.message?.content).trim();
-        if (text) {
+      if (
+        (entry.type === "user" && entry.userType === "external" && !entry.isMeta) ||
+        entry.type === "assistant"
+      ) {
+        const raw = extractText(entry.message?.content).trim();
+        const text = raw.replace(/<[^>]*>/g, "").trim();
+        if (!text) continue;
+        parts.push(text);
+        totalLen += (parts.length > 1 ? 3 : 0) + text.length; // 3 for " — "
+        if (totalLen >= 80) {
           rl.close();
-          return text.length > 80 ? text.slice(0, 80) + "..." : text;
-        }
-      }
-      if (entry.type === "assistant") {
-        const text = extractText(entry.message?.content).trim();
-        if (text) {
-          rl.close();
-          return text.length > 80 ? text.slice(0, 80) + "..." : text;
+          break;
         }
       }
     }
 
-    return "";
+    const preview = parts.join(" — ");
+    return preview.length > 80 ? preview.slice(0, 80) + "..." : preview;
   } catch {
     return "";
   }
