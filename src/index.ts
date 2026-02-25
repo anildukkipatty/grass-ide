@@ -15,7 +15,7 @@ const program = new Command();
 program
   .name("grass")
   .description("Grass CLI")
-  .version("1.0.0");
+  .version(require("../package.json").version);
 
 program
   .command("sync")
