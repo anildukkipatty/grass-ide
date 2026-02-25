@@ -256,6 +256,12 @@ export async function start(network: string = "local", portOverride?: number, ca
         return;
       }
 
+      // Handle cwd request from client
+      if (parsed.type === "get_cwd") {
+        ws.send(JSON.stringify({ type: "cwd", cwd }));
+        return;
+      }
+
       // Handle list_sessions request
       if (parsed.type === "list_sessions") {
         const sessionList = await listSessions(cwd);
