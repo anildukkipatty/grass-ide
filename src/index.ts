@@ -8,7 +8,8 @@ process.on("SIGINT", () => {
 import { Command } from "commander";
 import { sync } from "./sync";
 import { ls } from "./ls";
-import { start } from "./start";
+import { start as startClaudeCode } from "./start-claude-code";
+import { start as startOpencode } from "./start-opencode";
 
 const program = new Command();
 
@@ -33,12 +34,14 @@ program
 
 program
   .command("start")
-  .description("Start a WebSocket server for Claude agent interaction")
+  .description("Start a WebSocket server for agent interaction")
+  .option("-a, --agent <name>", "agent to use: claude-code or opencode", "claude-code")
   .option("-n, --network <type>", "network for QR code: local, tailscale, or remote-ip", "local")
   .option("-p, --port <number>", "port to listen on (default: auto-select from 32100–32199)", parseInt)
   .option("-c, --caffeinate", "run caffeinate for 8 hours to prevent sleep")
   .action(async (opts) => {
-    await start(opts.network, opts.port, opts.caffeinate ?? false);
+    const startFn = opts.agent === "opencode" ? startOpencode : startClaudeCode;
+    await startFn(opts.network, opts.port, opts.caffeinate ?? false);
   });
 
 program.parse();
