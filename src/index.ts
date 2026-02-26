@@ -41,7 +41,7 @@ program
   .option("-c, --caffeinate", "run caffeinate for 8 hours to prevent sleep")
   .action(async (opts) => {
     const startFn = opts.agent === "opencode" ? startOpencode : startClaudeCode;
-    await startFn(opts.network, opts.port, opts.caffeinate ?? false);
+    await startFn(opts.network, opts.port, opts.caffeinate ?? false, opts.agent ?? "claude-code");
   });
 
 program.parse();

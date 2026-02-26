@@ -188,7 +188,7 @@ function killCaffeinate(pid: number | null): void {
   }
 }
 
-export async function start(network: string = "local", portOverride?: number, caffeinate: boolean = false) {
+export async function start(network: string = "local", portOverride?: number, caffeinate: boolean = false, agent: string = "opencode") {
   const cwd = process.cwd();
   console.log(`Starting grass server (opencode)...`);
   const caffeinatePid = maybeCaffeinate(caffeinate);
@@ -272,7 +272,7 @@ export async function start(network: string = "local", portOverride?: number, ca
       }
 
       if (parsed.type === "get_cwd") {
-        ws.send(JSON.stringify({ type: "cwd", cwd }));
+        ws.send(JSON.stringify({ type: "cwd", cwd, agent }));
         return;
       }
 
