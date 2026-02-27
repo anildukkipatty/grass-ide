@@ -347,7 +347,6 @@ export async function start(network: string = "local", portOverride?: number, ca
 
       if (parsed.type === "permission_response") {
         const { toolUseID, approved } = parsed;
-        console.log(`[permission_response] id=${toolUseID} approved=${approved}`);
         if (attachedSessionId) {
           const ms = sessions.get(attachedSessionId);
           if (ms) {
@@ -553,16 +552,10 @@ async function startEventStream(client: any) {
 
       // Route event to the right session
       const sessionId = extractSessionId(type, props);
-      if (type.startsWith("permission")) {
-        console.log(`[event] type=${type} sessionId=${sessionId} props=${JSON.stringify(props)?.slice(0, 2000)}`);
-      }
       if (!sessionId) continue;
 
       const ms = sessions.get(sessionId);
       if (!ms) {
-        if (type === "permission.updated") {
-          console.log(`[permission.updated] DROPPED - no managed session for ${sessionId}. Known sessions: ${[...sessions.keys()].join(", ")}`);
-        }
         continue;
       }
 
@@ -638,7 +631,6 @@ async function startEventStream(client: any) {
           input = patterns.length > 0 ? { patterns } : (props.metadata ?? {});
         }
 
-        console.log(`[permission.asked] permId=${permId} tool=${toolName}`);
         if (permId) {
           ms.pendingPermissions.set(permId, {
             permissionId: permId,
@@ -651,7 +643,6 @@ async function startEventStream(client: any) {
             toolName,
             input,
           });
-          console.log(`[permission.asked] sent permission_request to client, socket open=${ms?.connectedSocket?.readyState === WebSocket.OPEN}`);
         }
       }
 
