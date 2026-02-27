@@ -197,16 +197,35 @@ export async function start(network: string = "local", portOverride?: number, ca
   // Initialize opencode SDK client
   console.log("  Starting opencode server...");
   const { createOpencode, createOpencodeClient } = await loadOpencodeSdk();
+
+  const permissionConfig = {
+    edit: "ask",
+    bash: "ask",
+    webfetch: "ask",
+    doom_loop: "ask",
+    external_directory: "ask",
+  } as const;
+
   let client;
   try {
-    const result = await createOpencode();
+    const result = await createOpencode({ config: { permission: permissionConfig } });
     client = result.client;
-    console.log("  opencode server ready (spawned)");
+    console.log("  opencode server ready (spawned), permissions: ask mode enabled");
   } catch {
-    // Server already running — connect to existing instance
+    // Server already running — connect to existing instance and update config
     console.log("  opencode server already running, connecting...");
     client = createOpencodeClient({ baseUrl: "http://127.0.0.1:4096" });
     console.log("  opencode client connected");
+    try {
+      const configResult = await client.config.get();
+      const currentConfig = (configResult.data ?? {}) as Record<string, any>;
+      await client.config.update({
+        body: { ...currentConfig, permission: permissionConfig },
+      });
+      console.log("  permissions: ask mode enabled");
+    } catch (err: any) {
+      console.warn("  permissions: could not set permission config:", err?.message);
+    }
   }
 
   let PORT: number;
@@ -534,10 +553,18 @@ async function startEventStream(client: any) {
 
       // Route event to the right session
       const sessionId = extractSessionId(type, props);
+      if (type.startsWith("permission")) {
+        console.log(`[event] type=${type} sessionId=${sessionId} props=${JSON.stringify(props)?.slice(0, 2000)}`);
+      }
       if (!sessionId) continue;
 
       const ms = sessions.get(sessionId);
-      if (!ms) continue;
+      if (!ms) {
+        if (type === "permission.updated") {
+          console.log(`[permission.updated] DROPPED - no managed session for ${sessionId}. Known sessions: ${[...sessions.keys()].join(", ")}`);
+        }
+        continue;
+      }
 
       // Map opencode events to our WebSocket protocol
       if (type === "message.part.updated") {
@@ -574,21 +601,57 @@ async function startEventStream(client: any) {
         }
       }
 
-      if (type === "permission.updated") {
-        // props IS the Permission object directly
+      if (type === "permission.asked") {
         const permId = props.id;
+        const permType = props.permission as string || "";
+        const patterns: string[] = props.patterns ?? [];
+
+        // Map opencode permission types to Claude Code tool names and readable input
+        let toolName: string;
+        let input: Record<string, unknown>;
+        if (permType === "bash") {
+          toolName = "Bash";
+          input = { command: patterns.join(" ") };
+        } else if (permType === "edit") {
+          toolName = "Edit";
+          const filePath = props.metadata?.filepath || patterns[0] || "";
+          const diff = props.metadata?.diff as string | undefined;
+          let old_string = "";
+          let new_string = "";
+          if (diff) {
+            // Parse unified diff to extract removed/added lines
+            const removed: string[] = [];
+            const added: string[] = [];
+            for (const line of diff.split("\n")) {
+              if (line.startsWith("-") && !line.startsWith("---")) removed.push(line.slice(1));
+              else if (line.startsWith("+") && !line.startsWith("+++")) added.push(line.slice(1));
+            }
+            old_string = removed.join("\n");
+            new_string = added.join("\n");
+          }
+          input = { file_path: filePath, old_string, new_string };
+        } else if (permType === "webfetch") {
+          toolName = "WebFetch";
+          input = { url: patterns[0] ?? "" };
+        } else {
+          toolName = permType || "Unknown";
+          input = patterns.length > 0 ? { patterns } : (props.metadata ?? {});
+        }
+
+        console.log(`[permission.asked] permId=${permId} tool=${toolName}`);
         if (permId) {
           ms.pendingPermissions.set(permId, {
             permissionId: permId,
-            title: props.title || "Permission required",
-            metadata: props.metadata || {},
+            title: toolName,
+            metadata: input,
           });
           safeSend(ms, {
             type: "permission_request",
             toolUseID: permId,
-            toolName: props.title || "Unknown tool",
-            input: props.metadata || {},
+            toolName,
+            input,
           });
+          console.log(`[permission.asked] sent permission_request to client, socket open=${ms?.connectedSocket?.readyState === WebSocket.OPEN}`);
         }
       }
 
