@@ -5,7 +5,7 @@ import http from "node:http";
 import qrcode from "qrcode-terminal";
 import { basename } from "path";
 import { html } from "./client-html";
-import { listRepos, cloneRepo, createFolder } from "./workspace";
+import { listRepos, cloneRepo, createFolder, listDir, readFile } from "./workspace";
 
 export const PORT_RANGE_START = 32100;
 export const PORT_RANGE_END = 32199;
@@ -314,6 +314,40 @@ export async function handleWorkspaceMessage(
       ws.send(JSON.stringify({ type: "folder_created", path: createdPath, name: folderName }));
     } catch (err: any) {
       ws.send(JSON.stringify({ type: "error", message: `Create failed: ${err?.message ?? "unknown error"}` }));
+    }
+    return true;
+  }
+
+  if (parsed.type === "list_dir") {
+    if (!state.selectedRepoPath) {
+      ws.send(JSON.stringify({ type: "error", message: "No repo selected" }));
+      return true;
+    }
+    const targetPath = (parsed.path as string) ?? state.selectedRepoPath;
+    try {
+      const entries = await listDir(targetPath, state.selectedRepoPath);
+      ws.send(JSON.stringify({ type: "dir_listing", path: targetPath, entries }));
+    } catch (err: any) {
+      ws.send(JSON.stringify({ type: "error", message: err?.message ?? "Failed to list directory" }));
+    }
+    return true;
+  }
+
+  if (parsed.type === "read_file") {
+    if (!state.selectedRepoPath) {
+      ws.send(JSON.stringify({ type: "error", message: "No repo selected" }));
+      return true;
+    }
+    const filePath = parsed.path as string;
+    if (!filePath) {
+      ws.send(JSON.stringify({ type: "error", message: "read_file requires a path" }));
+      return true;
+    }
+    try {
+      const { content, size } = await readFile(filePath, state.selectedRepoPath);
+      ws.send(JSON.stringify({ type: "file_content", path: filePath, content, size }));
+    } catch (err: any) {
+      ws.send(JSON.stringify({ type: "error", message: err?.message ?? "Failed to read file" }));
     }
     return true;
   }
