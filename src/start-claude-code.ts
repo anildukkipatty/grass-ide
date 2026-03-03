@@ -1,44 +1,22 @@
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocket } from "ws";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createReadStream, existsSync } from "fs";
+import { execSync } from "child_process";
 import { readdir, stat } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
-import { homedir, networkInterfaces } from "os";
-import { execSync, execFile, spawn } from "child_process";
-import http from "node:http";
-import qrcode from "qrcode-terminal";
-import { html } from "./client-html";
+import { homedir } from "os";
+import {
+  clearIdleTimer,
+  startIdleTimer,
+  safeSend,
+  type ManagedSessionBase,
+  type ConnectionState,
+} from "./server-common";
 
-const PORT_RANGE_START = 32100;
-const PORT_RANGE_END = 32199;
-const IDLE_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
-
-function findAvailablePort(startPort: number, endPort: number): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const tryPort = (port: number) => {
-      if (port > endPort) {
-        reject(new Error(`No available port found in range ${startPort}–${endPort}`));
-        return;
-      }
-      const server = http.createServer();
-      server.listen(port, () => {
-        server.close(() => resolve(port));
-      });
-      server.on("error", () => tryPort(port + 1));
-    };
-    tryPort(startPort);
-  });
-}
-
-interface ManagedSession {
-  sessionId: string;
-  connectedSocket: WebSocket | null;
-  streaming: boolean;
-  msgSeq: number;
+interface ManagedSession extends ManagedSessionBase {
   abortController: AbortController | null;
   pendingPermissions: Map<string, { resolve: (result: any) => void; input: any; toolName: string; toolUseID: string }>;
-  idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const sessions = new Map<string, ManagedSession>();
@@ -61,503 +39,272 @@ function getOrCreateManagedSession(sessionId: string): ManagedSession {
   return ms;
 }
 
-function clearIdleTimer(ms: ManagedSession) {
-  if (ms.idleTimer) {
-    clearTimeout(ms.idleTimer);
-    ms.idleTimer = null;
-  }
-}
-
-function startIdleTimer(ms: ManagedSession) {
-  clearIdleTimer(ms);
-  ms.idleTimer = setTimeout(() => {
-    console.log(`[idle] Cleaning up session ${ms.sessionId} after ${IDLE_CLEANUP_MS / 1000}s idle`);
-    sessions.delete(ms.sessionId);
-  }, IDLE_CLEANUP_MS);
-}
-
-function safeSend(ms: ManagedSession, payload: Record<string, unknown>) {
-  const ws = ms.connectedSocket;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(payload));
-  }
-}
-
-function getLocalIP(): string {
-  const nets = networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]!) {
-      if (net.family === "IPv4" && !net.internal) {
-        return net.address;
-      }
-    }
-  }
-  return "localhost";
-}
-
-function getPublicIP(): Promise<string | null> {
-  return new Promise((resolve) => {
-    http.get("http://api.ipify.org", (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => resolve(data.trim() || null));
-      res.on("error", () => resolve(null));
-    }).on("error", () => resolve(null));
-  });
-}
-
-function getTailscaleIP(): Promise<string | null> {
-  return new Promise((resolve) => {
-    // Check if Tailscale is actually running and connected
-    execFile("tailscale", ["status"], { timeout: 2000 }, (err) => {
-      if (err) return resolve(null);
-      // Status succeeded, now get the IP
-      execFile("tailscale", ["ip", "-4"], { timeout: 2000 }, (err, stdout) => {
-        if (err) return resolve(null);
-        const ip = stdout.trim().split("\n")[0];
-        resolve(ip || null);
-      });
-    });
-  });
-}
-
-async function showQR(network: string, port: number): Promise<void> {
-  let ip: string;
-  let label: string;
-
-  if (network === "tailscale") {
-    const tsIP = await getTailscaleIP();
-    if (!tsIP) {
-      console.error("  Tailscale IP not found. Is Tailscale running?");
-      process.exit(1);
-    }
-    ip = tsIP;
-    label = "Tailscale";
-  } else if (network === "remote-ip") {
-    const publicIP = await getPublicIP();
-    if (!publicIP) {
-      console.error("  Could not determine public IP address.");
-      process.exit(1);
-    }
-    ip = publicIP;
-    label = "Public";
-  } else if (network === "local") {
-    ip = getLocalIP();
-    label = "Local Network";
-  } else {
-    // Treat as a literal IP/hostname
-    ip = network;
-    label = "Custom";
-  }
-
-  const url = `http://${ip}:${port}`;
-
-  console.log(`\n  ${label}  ${url}\n`);
-
-  const qrCode = await new Promise<string>((resolve) => {
-    qrcode.generate(url, { small: true }, (code: string) => {
-      resolve(code.trimEnd());
-    });
-  });
-
-  console.log(qrCode);
-}
-
-function maybeCaffeinate(enabled: boolean): number | null {
-  if (!enabled) return null;
+// Called once at server startup. Checks that the claude CLI is available.
+// Returns true if the agent is available, false otherwise.
+export async function initAgent(): Promise<boolean> {
   try {
-    execSync("which caffeinate", { stdio: "ignore" });
+    execSync("claude --version", { stdio: "ignore" });
+    return true;
   } catch {
-    return null;
-  }
-  const hours = 8;
-  const seconds = hours * 60 * 60;
-  const child = spawn("caffeinate", ["-t", String(seconds)], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-  console.log(`  caffeinate: running for ${hours}h (pid ${child.pid})`);
-  return child.pid ?? null;
-}
-
-function killCaffeinate(pid: number | null): void {
-  if (pid === null) return;
-  try {
-    process.kill(pid);
-  } catch {
-    // already gone
+    console.warn("  claude CLI not found — claude-code agent unavailable");
+    return false;
   }
 }
 
-export async function start(network: string = "local", portOverride?: number, caffeinate: boolean = false, agent: string = "claude-code") {
-  const cwd = process.cwd();
-  console.log(`Starting grass server...`);
-  const caffeinatePid = maybeCaffeinate(caffeinate);
-  console.log(`  cwd:  ${cwd}`);
+// Handles all agent-specific WebSocket messages for a connection.
+// Called by server.ts for every message that isn't handled by the workspace layer.
+// Also called with { type: "__disconnect__" } on socket close.
+export async function handleMessage(
+  parsed: { type: string; [key: string]: any },
+  ws: WebSocket,
+  state: ConnectionState,
+  workspaceCwd: string,
+): Promise<void> {
+  const { selectedRepoPath } = state;
 
-  let PORT: number;
-  if (portOverride !== undefined) {
-    PORT = portOverride;
-    console.log(`  port: ${PORT} (specified)`);
-  } else {
-    try {
-      PORT = await findAvailablePort(PORT_RANGE_START, PORT_RANGE_END);
-      console.log(`  port: ${PORT} (auto-selected from ${PORT_RANGE_START}–${PORT_RANGE_END})`);
-    } catch {
-      console.error(`\n  No available port found in range ${PORT_RANGE_START}–${PORT_RANGE_END}.`);
-      console.error(`  Try stopping other grass sessions, or run with -p to specify a port.\n`);
-      process.exit(1);
+  // --- Disconnect cleanup ---
+  if (parsed.type === "__disconnect__") {
+    if (state.attachedSessionId) {
+      const ms = sessions.get(state.attachedSessionId);
+      if (ms && ms.connectedSocket === ws) {
+        ms.connectedSocket = null;
+        if (!ms.streaming) startIdleTimer(ms, sessions);
+        console.log(`Session ${state.attachedSessionId} detached (streaming=${ms.streaming})`);
+      }
     }
+    return;
   }
 
-  const server = http.createServer((_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(html);
-  });
-
-  const wss = new WebSocketServer({ server });
-
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`\n  Port ${PORT} is not available.`);
-      if (portOverride !== undefined) {
-        console.error(`  Please choose a different port with -p, or run without -p to auto-select one.\n`);
-      } else {
-        console.error(`  Try stopping other grass sessions, or run with -p to specify a port.\n`);
+  // --- Abort ---
+  if (parsed.type === "abort") {
+    if (state.attachedSessionId) {
+      const ms = sessions.get(state.attachedSessionId);
+      if (ms && ms.streaming && ms.abortController) {
+        ms.abortController.abort();
+        console.log("Client requested abort");
       }
-      process.exit(1);
     }
-    throw err;
-  });
+    return;
+  }
 
-  server.listen(PORT, async () => {
-    await showQR(network, PORT);
-  });
-
-  wss.on("connection", (ws) => {
-    console.log("Client connected");
-
-    // Track which managed session this socket is attached to
-    let attachedSessionId: string | null = null;
-
-    ws.on("message", async (raw) => {
-      let parsed: { type: string; content?: string; sessionId?: string; [key: string]: any };
-      try {
-        parsed = JSON.parse(raw.toString());
-      } catch {
-        ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
-        return;
-      }
-
-      // Handle ping from client
-      if (parsed.type === "ping") {
-        ws.send(JSON.stringify({ type: "pong" }));
-        return;
-      }
-
-      // Handle cwd request from client
-      if (parsed.type === "get_cwd") {
-        ws.send(JSON.stringify({ type: "cwd", cwd, agent }));
-        return;
-      }
-
-      // Handle list_sessions request
-      if (parsed.type === "list_sessions") {
-        const sessionList = await listSessions(cwd);
-        ws.send(JSON.stringify({ type: "sessions_list", sessions: sessionList }));
-        return;
-      }
-
-      // Handle get_diffs request
-      if (parsed.type === "get_diffs") {
-        let diff = "";
-        try {
-          diff = execSync("git diff HEAD", { cwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
-        } catch {
-          diff = "";
-        }
-        ws.send(JSON.stringify({ type: "diffs", diff }));
-        return;
-      }
-
-      // Handle abort signal
-      if (parsed.type === "abort") {
-        if (attachedSessionId) {
-          const ms = sessions.get(attachedSessionId);
-          if (ms && ms.streaming && ms.abortController) {
-            ms.abortController.abort();
-            console.log("Client requested abort");
-          }
-        }
-        return;
-      }
-
-      // Handle permission response from client
-      if (parsed.type === "permission_response") {
-        const { toolUseID, approved } = parsed;
-        console.log(`[permission_response] id=${toolUseID} approved=${approved}`);
-        if (attachedSessionId) {
-          const ms = sessions.get(attachedSessionId);
-          if (ms) {
-            const pending = ms.pendingPermissions.get(toolUseID);
-            if (pending) {
-              ms.pendingPermissions.delete(toolUseID);
-              console.log(`[permission_response] resolving with behavior=${approved ? "allow" : "deny"}`);
-              pending.resolve(approved
-                ? { behavior: "allow", updatedInput: pending.input }
-                : { behavior: "deny", message: "User denied" }
-              );
-            } else {
-              console.log(`[permission_response] no resolver found for ${toolUseID}`);
-            }
-          }
-        }
-        return;
-      }
-
-      // Handle init — client sends sessionId to resume
-      if (parsed.type === "init") {
-        if (parsed.sessionId && typeof parsed.sessionId === "string") {
-          const sessionId = parsed.sessionId;
-          console.log("Client requested session resume:", sessionId);
-
-          // Detach from previous session if switching
-          if (attachedSessionId && attachedSessionId !== sessionId) {
-            const oldMs = sessions.get(attachedSessionId);
-            if (oldMs && oldMs.connectedSocket === ws) {
-              oldMs.connectedSocket = null;
-              if (!oldMs.streaming) startIdleTimer(oldMs);
-            }
-          }
-
-          attachedSessionId = sessionId;
-
-          // Attach socket to managed session (if it exists)
-          const ms = sessions.get(sessionId);
-          if (ms) {
-            // Disconnect previous client on this session (last one wins)
-            if (ms.connectedSocket && ms.connectedSocket !== ws && ms.connectedSocket.readyState === WebSocket.OPEN) {
-              ms.connectedSocket.send(JSON.stringify({ type: "error", message: "Another client connected to this session" }));
-              ms.connectedSocket.close();
-            }
-            ms.connectedSocket = ws;
-            clearIdleTimer(ms);
-          }
-
-          // Load and send transcript history
-          const history = await loadTranscript(sessionId, cwd);
-          if (history.length > 0) {
-            ws.send(JSON.stringify({ type: "history", messages: history }));
-          }
-
-          // Send session status so client knows if a query is running
-          const streaming = ms?.streaming ?? false;
-          ws.send(JSON.stringify({ type: "session_status", streaming, sessionId }));
-
-          // Flush any pending permission requests
-          if (ms) {
-            for (const [id, pending] of ms.pendingPermissions) {
-              ws.send(JSON.stringify({
-                type: "permission_request",
-                toolUseID: id,
-                toolName: pending.toolName,
-                input: pending.input,
-              }));
-            }
-          }
-        }
-        return;
-      }
-
-      if (parsed.type !== "message" || typeof parsed.content !== "string") {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: 'Expected { type: "message", content: string } or { type: "abort" }',
-          })
-        );
-        return;
-      }
-
-      // Check if already streaming on this session
-      if (attachedSessionId) {
-        const ms = sessions.get(attachedSessionId);
-        if (ms && ms.streaming) {
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              message: "Already processing a message, wait for result",
-            })
-          );
-          return;
-        }
-      }
-
-      // Start query — create or reuse managed session
-      const sessionId = attachedSessionId; // may be null for new session
-      const abortController = new AbortController();
-
-      // We'll get the real session ID from the init message, but need a placeholder MS
-      // For now, create a temporary reference that we'll update
-      let ms: ManagedSession | null = null;
-      if (sessionId) {
-        ms = getOrCreateManagedSession(sessionId);
-      }
-
+  // --- Permission response ---
+  if (parsed.type === "permission_response") {
+    const { toolUseID, approved } = parsed;
+    console.log(`[permission_response] id=${toolUseID} approved=${approved}`);
+    if (state.attachedSessionId) {
+      const ms = sessions.get(state.attachedSessionId);
       if (ms) {
-        ms.streaming = true;
-        ms.abortController = abortController;
-        ms.connectedSocket = ws;
-      }
-
-      try {
-        console.log("[query] starting with permissionMode=default + canUseTool");
-        const q = query({
-          prompt: parsed.content,
-          options: {
-            model: "claude-opus-4-6",
-            permissionMode: "default",
-            abortController,
-            includePartialMessages: true,
-            ...(sessionId ? { resume: sessionId } : {}),
-            canUseTool: (toolName, input, { signal, toolUseID, decisionReason }) => {
-              console.log(`[canUseTool] tool=${toolName} id=${toolUseID} reason=${decisionReason}`);
-              return new Promise((resolve) => {
-                if (!ms) {
-                  // Session not yet initialized, deny
-                  resolve({ behavior: "deny", message: "Session not ready" });
-                  return;
-                }
-
-                // Store resolver with tool info for reconnect
-                ms.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
-
-                // Send to client if connected
-                safeSend(ms, {
-                  type: "permission_request",
-                  toolUseID,
-                  toolName,
-                  input,
-                });
-
-                // If aborted, clean up and deny
-                signal.addEventListener("abort", () => {
-                  const p = ms!.pendingPermissions.get(toolUseID);
-                  if (p) {
-                    ms!.pendingPermissions.delete(toolUseID);
-                    p.resolve({ behavior: "deny", message: "Request aborted" });
-                  }
-                }, { once: true });
-              });
-            },
-          },
-        });
-
-        try {
-          for await (const msg of q) {
-            // Capture session ID from init message
-            if (msg.type === "system" && msg.subtype === "init") {
-              const newSessionId = (msg as any).session_id;
-              if (newSessionId && !ms) {
-                // First time seeing session ID — create managed session
-                ms = getOrCreateManagedSession(newSessionId);
-                ms.streaming = true;
-                ms.abortController = abortController;
-                ms.connectedSocket = ws;
-                attachedSessionId = newSessionId;
-              }
-            }
-
-            if (!ms) continue;
-
-            const payload = formatMessage(msg, ms.msgSeq);
-            if (payload) {
-              const items = Array.isArray(payload) ? payload : [payload];
-              for (const item of items) {
-                if (item.type === "assistant") ms.msgSeq++;
-                safeSend(ms, item as Record<string, unknown>);
-              }
-            }
-          }
-        } catch (err: any) {
-          if (err?.name === "AbortError" || abortController.signal.aborted) {
-            console.log("[query] aborted");
-            if (ms) {
-              safeSend(ms, {
-                type: "aborted",
-                message: "Request aborted by user",
-              });
-            }
-          } else {
-            throw err;
-          }
-        }
-      } catch (err: any) {
-        console.log("[query] outer error:", err?.message, err?.stack);
-        if (ms) {
-          safeSend(ms, {
-            type: "error",
-            message: err?.message ?? "Unknown error",
-          });
-        }
-      } finally {
-        if (ms) {
-          ms.streaming = false;
-          ms.abortController = null;
-          // Clear any stale pending permissions so they don't get flushed on reconnect
-          ms.pendingPermissions.clear();
-          // If no client connected, start idle cleanup
-          if (!ms.connectedSocket || ms.connectedSocket.readyState !== WebSocket.OPEN) {
-            startIdleTimer(ms);
-          }
+        const pending = ms.pendingPermissions.get(toolUseID);
+        if (pending) {
+          ms.pendingPermissions.delete(toolUseID);
+          console.log(`[permission_response] resolving with behavior=${approved ? "allow" : "deny"}`);
+          pending.resolve(approved
+            ? { behavior: "allow", updatedInput: pending.input }
+            : { behavior: "deny", message: "User denied" }
+          );
+        } else {
+          console.log(`[permission_response] no resolver found for ${toolUseID}`);
         }
       }
-    });
-
-    ws.on("close", () => {
-      console.log("Client disconnected");
-      // Detach socket but do NOT abort the query
-      if (attachedSessionId) {
-        const ms = sessions.get(attachedSessionId);
-        if (ms && ms.connectedSocket === ws) {
-          ms.connectedSocket = null;
-          // If not streaming, start idle cleanup
-          if (!ms.streaming) {
-            startIdleTimer(ms);
-          }
-          // If streaming, query continues headlessly — no abort
-          console.log(`Session ${attachedSessionId} detached (streaming=${ms.streaming})`);
-        }
-      }
-    });
-  });
-
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log("\nShutting down...");
-    killCaffeinate(caffeinatePid);
-    // Abort all running queries
-    for (const [, ms] of sessions) {
-      if (ms.abortController) ms.abortController.abort();
-      clearIdleTimer(ms);
     }
-    wss.clients.forEach((ws) => ws.close());
-    wss.close();
-    server.close(() => {
-      process.exit(0);
+    return;
+  }
+
+  // --- Session list ---
+  if (parsed.type === "list_sessions") {
+    const cwd = selectedRepoPath ?? workspaceCwd;
+    const sessionList = await listSessions(cwd);
+    ws.send(JSON.stringify({ type: "sessions_list", sessions: sessionList }));
+    return;
+  }
+
+  // --- Init / resume session ---
+  if (parsed.type === "init") {
+    if (parsed.sessionId && typeof parsed.sessionId === "string") {
+      const sessionId = parsed.sessionId;
+      console.log("Client requested session resume:", sessionId);
+
+      // Detach from previous session if switching
+      if (state.attachedSessionId && state.attachedSessionId !== sessionId) {
+        const oldMs = sessions.get(state.attachedSessionId);
+        if (oldMs && oldMs.connectedSocket === ws) {
+          oldMs.connectedSocket = null;
+          if (!oldMs.streaming) startIdleTimer(oldMs, sessions);
+        }
+      }
+
+      state.attachedSessionId = sessionId;
+
+      // Attach socket to managed session (if it exists)
+      const ms = sessions.get(sessionId);
+      if (ms) {
+        if (ms.connectedSocket && ms.connectedSocket !== ws && ms.connectedSocket.readyState === WebSocket.OPEN) {
+          ms.connectedSocket.send(JSON.stringify({ type: "error", message: "Another client connected to this session" }));
+          ms.connectedSocket.close();
+        }
+        ms.connectedSocket = ws;
+        clearIdleTimer(ms);
+      }
+
+      // Load and send transcript history
+      const cwd = selectedRepoPath ?? workspaceCwd;
+      const history = await loadTranscript(sessionId, cwd);
+      if (history.length > 0) {
+        ws.send(JSON.stringify({ type: "history", messages: history }));
+      }
+
+      const streaming = ms?.streaming ?? false;
+      ws.send(JSON.stringify({ type: "session_status", streaming, sessionId }));
+
+      // Flush any pending permission requests
+      if (ms) {
+        for (const [id, pending] of ms.pendingPermissions) {
+          ws.send(JSON.stringify({
+            type: "permission_request",
+            toolUseID: id,
+            toolName: pending.toolName,
+            input: pending.input,
+          }));
+        }
+      }
+    } else {
+      // No sessionId — client is starting a new chat; detach from any current session
+      console.log("Client requested new chat (detaching from session)");
+      if (state.attachedSessionId) {
+        const oldMs = sessions.get(state.attachedSessionId);
+        if (oldMs && oldMs.connectedSocket === ws) {
+          oldMs.connectedSocket = null;
+          if (!oldMs.streaming) startIdleTimer(oldMs, sessions);
+        }
+        state.attachedSessionId = null;
+      }
+    }
+    return;
+  }
+
+  // --- Chat message ---
+  if (parsed.type !== "message" || typeof parsed.content !== "string") {
+    ws.send(JSON.stringify({
+      type: "error",
+      message: 'Expected { type: "message", content: string } or { type: "abort" }',
+    }));
+    return;
+  }
+
+  if (!selectedRepoPath) {
+    ws.send(JSON.stringify({ type: "error", message: "Please select a repository before starting a chat." }));
+    return;
+  }
+
+  if (state.attachedSessionId) {
+    const ms = sessions.get(state.attachedSessionId);
+    if (ms && ms.streaming) {
+      ws.send(JSON.stringify({ type: "error", message: "Already processing a message, wait for result" }));
+      return;
+    }
+  }
+
+  const sessionId = state.attachedSessionId;
+  const abortController = new AbortController();
+
+  let ms: ManagedSession | null = null;
+  if (sessionId) {
+    ms = getOrCreateManagedSession(sessionId);
+  }
+
+  if (ms) {
+    ms.streaming = true;
+    ms.abortController = abortController;
+    ms.connectedSocket = ws;
+  }
+
+  const repoCwd = selectedRepoPath;
+
+  try {
+    console.log("[query] starting with permissionMode=default + canUseTool");
+    const q = query({
+      prompt: parsed.content,
+      options: {
+        model: "claude-opus-4-6",
+        permissionMode: "default",
+        abortController,
+        includePartialMessages: true,
+        cwd: repoCwd,
+        ...(sessionId ? { resume: sessionId } : {}),
+        canUseTool: (toolName, input, { signal, toolUseID, decisionReason }) => {
+          console.log(`[canUseTool] tool=${toolName} id=${toolUseID} reason=${decisionReason}`);
+          return new Promise((resolve) => {
+            if (!ms) {
+              resolve({ behavior: "deny", message: "Session not ready" });
+              return;
+            }
+
+            ms.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
+
+            safeSend(ms, {
+              type: "permission_request",
+              toolUseID,
+              toolName,
+              input,
+            });
+
+            signal.addEventListener("abort", () => {
+              const p = ms!.pendingPermissions.get(toolUseID);
+              if (p) {
+                ms!.pendingPermissions.delete(toolUseID);
+                p.resolve({ behavior: "deny", message: "Request aborted" });
+              }
+            }, { once: true });
+          });
+        },
+      },
     });
-  };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+    try {
+      for await (const msg of q) {
+        if (msg.type === "system" && msg.subtype === "init") {
+          const newSessionId = (msg as any).session_id;
+          if (newSessionId && !ms) {
+            ms = getOrCreateManagedSession(newSessionId);
+            ms.streaming = true;
+            ms.abortController = abortController;
+            ms.connectedSocket = ws;
+            state.attachedSessionId = newSessionId;
+          }
+        }
 
-  process.on("exit", () => killCaffeinate(caffeinatePid));
-  process.on("uncaughtException", (err) => {
-    console.error("Uncaught exception:", err);
-    killCaffeinate(caffeinatePid);
-    process.exit(1);
-  });
+        if (!ms) continue;
+
+        const payload = formatMessage(msg, ms.msgSeq);
+        if (payload) {
+          const items = Array.isArray(payload) ? payload : [payload];
+          for (const item of items) {
+            if (item.type === "assistant") ms.msgSeq++;
+            safeSend(ms, item as Record<string, unknown>);
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err?.name === "AbortError" || abortController.signal.aborted) {
+        console.log("[query] aborted");
+        if (ms) safeSend(ms, { type: "aborted", message: "Request aborted by user" });
+      } else {
+        throw err;
+      }
+    }
+  } catch (err: any) {
+    console.log("[query] outer error:", err?.message, err?.stack);
+    if (ms) safeSend(ms, { type: "error", message: err?.message ?? "Unknown error" });
+  } finally {
+    if (ms) {
+      ms.streaming = false;
+      ms.abortController = null;
+      ms.pendingPermissions.clear();
+      if (!ms.connectedSocket || ms.connectedSocket.readyState !== WebSocket.OPEN) {
+        startIdleTimer(ms, sessions);
+      }
+    }
+  }
 }
 
 function formatMessage(
@@ -600,11 +347,7 @@ function formatMessage(
           return { type: "status", status: "thinking" };
         }
         if (event.content_block?.type === "tool_use") {
-          return {
-            type: "status",
-            status: "tool",
-            tool_name: event.content_block.name,
-          };
+          return { type: "status", status: "tool", tool_name: event.content_block.name };
         }
       }
       return null;
@@ -612,12 +355,7 @@ function formatMessage(
 
     case "tool_progress": {
       const tp = msg as any;
-      return {
-        type: "status",
-        status: "tool",
-        tool_name: tp.tool_name,
-        elapsed: tp.elapsed_time_seconds,
-      };
+      return { type: "status", status: "tool", tool_name: tp.tool_name, elapsed: tp.elapsed_time_seconds };
     }
 
     case "tool_use_summary": {
@@ -738,7 +476,7 @@ async function getSessionPreview(filePath: string): Promise<string> {
         const text = raw.replace(/<[^>]*>/g, "").trim();
         if (!text) continue;
         parts.push(text);
-        totalLen += (parts.length > 1 ? 3 : 0) + text.length; // 3 for " — "
+        totalLen += (parts.length > 1 ? 3 : 0) + text.length;
         if (totalLen >= 80) {
           rl.close();
           break;
@@ -778,7 +516,6 @@ async function listSessions(
     );
 
     sessionList.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-
     return sessionList;
   } catch (err: any) {
     console.error("Error listing sessions:", err.message);

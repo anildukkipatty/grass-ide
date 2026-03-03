@@ -353,6 +353,131 @@ export const html = `<!DOCTYPE html>
     color: var(--text);
   }
   .permission-actions .deny-btn:hover { background: var(--border); }
+  /* Workspace picker */
+  .workspace-picker {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+  }
+  .workspace-picker-header {
+    padding: 16px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .workspace-picker-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+    flex: 1;
+  }
+  .repo-list {
+    list-style: none;
+    padding: 0 16px 8px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .repo-item {
+    padding: 14px 16px;
+    background: var(--msg-assistant-bg);
+    border: 1px solid var(--msg-assistant-border);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .repo-item:hover { background: var(--bar-bg); }
+  .repo-item:active { opacity: 0.7; transform: scale(0.98); }
+  .repo-item-name {
+    font-size: 15px;
+    font-weight: 500;
+    flex: 1;
+  }
+  .repo-item-badge {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: rgba(46,160,67,0.15);
+    color: #3fb950;
+    border: 1px solid rgba(46,160,67,0.3);
+    flex-shrink: 0;
+  }
+  .repo-item-badge.non-git {
+    background: rgba(0,0,0,0.06);
+    color: var(--badge-text);
+    border-color: var(--border);
+  }
+  .clone-section {
+    padding: 12px 16px 16px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+  }
+  .clone-section h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--badge-text);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .clone-input-row {
+    display: flex;
+    gap: 8px;
+  }
+  .clone-input-row input {
+    flex: 1;
+    background: var(--input-bg);
+    color: var(--input-text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    min-height: 44px;
+  }
+  .clone-input-row input:focus { border-color: var(--accent); }
+  .clone-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-family: inherit;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+  .clone-btn:hover { background: var(--accent-hover); }
+  .clone-btn:active { opacity: 0.8; transform: scale(0.96); }
+  .clone-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .clone-status {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--badge-text);
+  }
+  .clone-error {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--msg-error-text);
+  }
+  .workspace-empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--badge-text);
+    font-size: 15px;
+  }
   /* Session picker */
   .session-picker {
     flex: 1;
@@ -632,6 +757,14 @@ export const html = `<!DOCTYPE html>
     .session-item-preview { font-size: 13px; }
     .session-item-id { font-size: 10px; }
     .sessions-btn { font-size: 11px; padding: 4px 10px; min-height: 32px; }
+    .workspace-picker-header { padding: 12px 16px; }
+    .workspace-picker-header h2 { font-size: 16px; }
+    .repo-list { padding: 0 16px 8px; gap: 4px; }
+    .repo-item { padding: 10px 14px; border-radius: 8px; }
+    .repo-item-name { font-size: 14px; }
+    .clone-section { padding: 10px 16px 14px; }
+    .clone-input-row input { font-size: 13px; min-height: 36px; }
+    .clone-btn { font-size: 13px; min-height: 36px; padding: 8px 14px; }
   }
 </style>
 </head>
@@ -845,10 +978,21 @@ function App() {
   const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
   const [permissionQueue, setPermissionQueue] = useState([]);
-  const [view, setView] = useState(() => getCurrentSessionId() ? "chat" : "picker");
+  const [view, setView] = useState("workspace");
   const [sessionsList, setSessionsList] = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [diffFiles, setDiffFiles] = useState([]);
+  // Workspace state
+  const [repos, setRepos] = useState([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [selectedRepo, setSelectedRepo] = useState(null); // { path, name }
+  const [selectedAgent, setSelectedAgent] = useState(null); // "claude-code" | "opencode"
+  const [cloneUrl, setCloneUrl] = useState("");
+  const [cloning, setCloning] = useState(false);
+  const [cloneError, setCloneError] = useState(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [createError, setCreateError] = useState(null);
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -919,14 +1063,9 @@ function App() {
         setReconnecting(false);
         reconnectDelayRef.current = 1000;
         startPing(ws);
-        // Always request session list
-        setLoadingSessions(true);
-        ws.send(JSON.stringify({ type: "list_sessions" }));
-        // If we have a current session, init it
-        const sid = getCurrentSessionId();
-        if (sid) {
-          ws.send(JSON.stringify({ type: "init", sessionId: sid }));
-        }
+        // Load workspace repo list on connect
+        setLoadingRepos(true);
+        ws.send(JSON.stringify({ type: "list_repos" }));
         setTimeout(() => textareaRef.current?.focus(), 0);
       };
 
@@ -951,6 +1090,38 @@ function App() {
 
         if (data.type === "pong") {
           clearTimeout(pongTimeoutRef.current);
+          return;
+        }
+
+        if (data.type === "repos_list") {
+          setRepos(data.repos || []);
+          setLoadingRepos(false);
+          return;
+        }
+
+        if (data.type === "repo_selected") {
+          setSelectedRepo({ path: data.path, name: data.name });
+          return;
+        }
+
+        if (data.type === "repo_cloned") {
+          setSelectedRepo({ path: data.path, name: data.name });
+          setCloning(false);
+          setCloneUrl("");
+          setCloneError(null);
+          setSelectedAgent(null);
+          setView("agent_picker");
+          return;
+        }
+
+        if (data.type === "folder_created") {
+          setSelectedRepo({ path: data.path, name: data.name });
+          setCreatingFolder(false);
+          setNewFolderName("");
+          setCreateError(null);
+          setRepos(prev => [...prev, { path: data.path, name: data.name, isGit: false }]);
+          setSelectedAgent(null);
+          setView("agent_picker");
           return;
         }
 
@@ -1046,6 +1217,18 @@ function App() {
           setActivity(null);
           setMessages(prev => [...prev, { role: "error", content: "\u26A0\uFE0F " + data.message }]);
         } else if (data.type === "error") {
+          // If we're cloning, show clone error inline
+          if (cloning) {
+            setCloning(false);
+            setCloneError(data.message);
+            return;
+          }
+          // If we're creating a folder, show create error inline
+          if (creatingFolder) {
+            setCreatingFolder(false);
+            setCreateError(data.message);
+            return;
+          }
           setStreaming(false);
           setActivity(null);
           setMessages(prev => [...prev, { role: "error", content: data.message }]);
@@ -1085,7 +1268,9 @@ function App() {
     setMessages([]);
     setActivity(null);
     setView("chat");
-    if (wsRef.current) wsRef.current.close();
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "init" }));
+    }
   }, []);
 
   const selectSession = useCallback((id) => {
@@ -1099,6 +1284,57 @@ function App() {
       wsRef.current.send(JSON.stringify({ type: "init", sessionId: id }));
     }
   }, []);
+
+  const showWorkspace = useCallback(() => {
+    setView("workspace");
+    // Refresh repo list
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setLoadingRepos(true);
+      wsRef.current.send(JSON.stringify({ type: "list_repos" }));
+    }
+  }, []);
+
+  const handleSelectRepo = useCallback((repo) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "select_repo", path: repo.path }));
+    }
+    setSelectedRepo({ path: repo.path, name: repo.name });
+    setSelectedAgent(null);
+    setView("agent_picker");
+  }, []);
+
+  const handleSelectAgent = useCallback((agent) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "select_agent", agent }));
+    }
+    setSelectedAgent(agent);
+    // Load sessions for the selected repo + agent
+    setLoadingSessions(true);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "list_sessions" }));
+    }
+    setView("picker");
+  }, []);
+
+  const handleClone = useCallback(() => {
+    const url = cloneUrl.trim();
+    if (!url || cloning) return;
+    setCloning(true);
+    setCloneError(null);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "clone_repo", url }));
+    }
+  }, [cloneUrl, cloning]);
+
+  const handleCreateFolder = useCallback(() => {
+    const name = newFolderName.trim();
+    if (!name || creatingFolder) return;
+    setCreatingFolder(true);
+    setCreateError(null);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "create_folder", name }));
+    }
+  }, [newFolderName, creatingFolder]);
 
   const showPicker = useCallback(() => {
     setView("picker");
@@ -1146,13 +1382,108 @@ function App() {
     return React.createElement(DiffView, { files: diffFiles, onBack: () => setView("chat") });
   }
 
+  if (view === "workspace") {
+    return (
+      <>
+        <div id="status-bar">
+          <div className={"status-dot" + (connected ? " connected" : "")} />
+          <span>{connected ? "Workspace" : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} style={{ marginLeft: "auto" }} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
+        </div>
+        <div className="workspace-picker">
+          <div className="workspace-picker-header">
+            <h2>Pick a Repo</h2>
+          </div>
+          {loadingRepos ? (
+            <div className="workspace-empty">Loading repos...</div>
+          ) : repos.length === 0 ? (
+            <div className="workspace-empty">No subdirectories found. Clone a repo below.</div>
+          ) : (
+            <ul className="repo-list">
+              {repos.map((repo) => (
+                <li key={repo.path} className="repo-item" onClick={() => handleSelectRepo(repo)}>
+                  <span className="repo-item-name">{repo.name}</span>
+                  <span className={"repo-item-badge" + (repo.isGit ? "" : " non-git")}>{repo.isGit ? "git" : "folder"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="clone-section">
+            <h3>Clone a Repo</h3>
+            <div className="clone-input-row">
+              <input
+                type="text"
+                placeholder="https://github.com/user/repo.git"
+                value={cloneUrl}
+                onChange={e => { setCloneUrl(e.target.value); setCloneError(null); }}
+                onKeyDown={e => { if (e.key === "Enter") handleClone(); }}
+                disabled={cloning}
+              />
+              <button className="clone-btn" onClick={handleClone} disabled={cloning || !cloneUrl.trim()}>
+                {cloning ? "Cloning..." : "Clone"}
+              </button>
+            </div>
+            {cloning && <div className="clone-status">Cloning repository, please wait...</div>}
+            {cloneError && <div className="clone-error">{cloneError}</div>}
+          </div>
+          <div className="clone-section">
+            <h3>New Project</h3>
+            <div className="clone-input-row">
+              <input
+                type="text"
+                placeholder="my-project"
+                value={newFolderName}
+                onChange={e => { setNewFolderName(e.target.value); setCreateError(null); }}
+                onKeyDown={e => { if (e.key === "Enter") handleCreateFolder(); }}
+                disabled={creatingFolder}
+              />
+              <button className="clone-btn" onClick={handleCreateFolder} disabled={creatingFolder || !newFolderName.trim()}>
+                {creatingFolder ? "Creating..." : "Create"}
+              </button>
+            </div>
+            {createError && <div className="clone-error">{createError}</div>}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (view === "agent_picker") {
+    return (
+      <>
+        <div id="status-bar">
+          <div className={"status-dot" + (connected ? " connected" : "")} />
+          <span>{connected ? (selectedRepo ? selectedRepo.name : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+          <button className="sessions-btn" onClick={showWorkspace} style={{ marginLeft: "auto" }}>← Repos</button>
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
+        </div>
+        <div className="session-picker">
+          <div className="session-picker-header">
+            <h2>Pick an Agent</h2>
+          </div>
+          <ul className="repo-list">
+            <li className="repo-item" onClick={() => handleSelectAgent("claude-code")}>
+              <span className="repo-item-name">Claude Code</span>
+              <span className="repo-item-badge">claude-code</span>
+            </li>
+            <li className="repo-item" onClick={() => handleSelectAgent("opencode")}>
+              <span className="repo-item-name">opencode</span>
+              <span className="repo-item-badge">opencode</span>
+            </li>
+          </ul>
+        </div>
+      </>
+    );
+  }
+
   if (view === "picker") {
     return (
       <>
         <div id="status-bar">
           <div className={"status-dot" + (connected ? " connected" : "")} />
-          <span>{connected ? "Connected" : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
-          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} style={{ marginLeft: "auto" }} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
+          <span>{connected ? (selectedRepo ? selectedRepo.name : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+          <button className="sessions-btn" onClick={showWorkspace} style={{ marginLeft: "auto" }}>← Repos</button>
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
         </div>
         <div className="session-picker">
           <div className="session-picker-header">
@@ -1185,7 +1516,7 @@ function App() {
     <>
       <div id="status-bar">
         <div className={"status-dot" + (connected ? " connected" : "")} />
-        <span>{connected ? (streaming ? "Streaming..." : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+        <span>{connected ? (streaming ? "Streaming..." : (selectedRepo ? selectedRepo.name : "Connected")) : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
         <button className="sessions-btn" onClick={showDiffs}>Diffs</button>
         <button className="sessions-btn" onClick={showPicker} disabled={streaming}>Sessions</button>
         <button className="new-chat-btn" onClick={newChat} disabled={streaming} title="New Chat" dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' }} />
