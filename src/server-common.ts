@@ -319,13 +319,14 @@ export async function handleWorkspaceMessage(
   }
 
   if (parsed.type === "list_dir") {
-    if (!state.selectedRepoPath) {
+    const repoRoot = (parsed.repoPath as string | undefined) || state.selectedRepoPath;
+    if (!repoRoot) {
       ws.send(JSON.stringify({ type: "error", message: "No repo selected" }));
       return true;
     }
-    const targetPath = (parsed.path as string) ?? state.selectedRepoPath;
+    const targetPath = (parsed.path as string) ?? repoRoot;
     try {
-      const entries = await listDir(targetPath, state.selectedRepoPath);
+      const entries = await listDir(targetPath, repoRoot);
       ws.send(JSON.stringify({ type: "dir_listing", path: targetPath, entries }));
     } catch (err: any) {
       ws.send(JSON.stringify({ type: "error", message: err?.message ?? "Failed to list directory" }));
@@ -334,7 +335,8 @@ export async function handleWorkspaceMessage(
   }
 
   if (parsed.type === "read_file") {
-    if (!state.selectedRepoPath) {
+    const repoRoot = (parsed.repoPath as string | undefined) || state.selectedRepoPath;
+    if (!repoRoot) {
       ws.send(JSON.stringify({ type: "error", message: "No repo selected" }));
       return true;
     }
@@ -344,7 +346,7 @@ export async function handleWorkspaceMessage(
       return true;
     }
     try {
-      const { content, size } = await readFile(filePath, state.selectedRepoPath);
+      const { content, size } = await readFile(filePath, repoRoot);
       ws.send(JSON.stringify({ type: "file_content", path: filePath, content, size }));
     } catch (err: any) {
       ws.send(JSON.stringify({ type: "error", message: err?.message ?? "Failed to read file" }));
