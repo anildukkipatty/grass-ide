@@ -1,15 +1,13 @@
-import { WebSocket, WebSocketServer } from "ws";
 import { networkInterfaces } from "os";
 import { execSync, execFile, spawn } from "child_process";
 import http from "node:http";
+import { EventEmitter } from "events";
 import qrcode from "qrcode-terminal";
-import { basename } from "path";
 import { html } from "./client-html";
 import { listRepos, cloneRepo, createFolder, listDir, readFile } from "./workspace";
 
 export const PORT_RANGE_START = 32100;
 export const PORT_RANGE_END = 32199;
-export const IDLE_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
 
 export function findAvailablePort(startPort: number, endPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -131,58 +129,81 @@ export function killCaffeinate(pid: number | null): void {
   }
 }
 
-// Minimal common fields shared between both agent implementations.
-// Each agent file still defines its own full ManagedSession interface
-// (with agent-specific fields) and casts as needed.
-export interface ManagedSessionBase {
-  sessionId: string;
-  connectedSocket: WebSocket | null;
-  streaming: boolean;
-  msgSeq: number;
-  idleTimer: ReturnType<typeof setTimeout> | null;
+// --- Session Store ---
+
+export interface StoredEvent {
+  seq: number;
+  type: string;
+  [key: string]: unknown;
 }
 
-export function clearIdleTimer(ms: ManagedSessionBase): void {
-  if (ms.idleTimer) {
-    clearTimeout(ms.idleTimer);
-    ms.idleTimer = null;
-  }
+export interface PendingPermission {
+  resolve: (result: any) => void;
+  input: any;
+  toolName: string;
+  toolUseID: string;
 }
 
-export function startIdleTimer<T extends ManagedSessionBase>(
-  ms: T,
-  sessions: Map<string, T>
-): void {
-  clearIdleTimer(ms);
-  ms.idleTimer = setTimeout(() => {
-    console.log(`[idle] Cleaning up session ${ms.sessionId} after ${IDLE_CLEANUP_MS / 1000}s idle`);
-    sessions.delete(ms.sessionId);
-  }, IDLE_CLEANUP_MS);
+export interface SessionStore {
+  grassId: string;
+  sdkSessionId: string | null;
+  agent: "claude-code" | "opencode";
+  repoPath: string;
+  seq: number;
+  events: StoredEvent[];
+  status: "running" | "done" | "error";
+  emitter: EventEmitter;
+  abortController: AbortController | null;
+  pendingPermissions: Map<string, PendingPermission>;
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
 }
 
-export function safeSend(ms: ManagedSessionBase, payload: Record<string, unknown>): void {
-  const ws = ms.connectedSocket;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(payload));
-  }
+export const sessions = new Map<string, SessionStore>();
+
+export function createSession(
+  grassId: string,
+  agent: "claude-code" | "opencode",
+  repoPath: string
+): SessionStore {
+  const store: SessionStore = {
+    grassId,
+    sdkSessionId: null,
+    agent,
+    repoPath,
+    seq: 0,
+    events: [],
+    status: "running",
+    emitter: new EventEmitter(),
+    abortController: null,
+    pendingPermissions: new Map(),
+    cleanupTimer: null,
+  };
+  sessions.set(grassId, store);
+  return store;
 }
 
-// Shared connection state passed into handleWorkspaceMessage and agent handleMessage.
-// The server owns this object; both the workspace handler and agent handler mutate it.
-export interface ConnectionState {
-  selectedRepoPath: string | null;
-  selectedAgent: "claude-code" | "opencode" | null;
-  attachedSessionId: string | null;
+export function scheduleCleanup(store: SessionStore): void {
+  if (store.cleanupTimer) clearTimeout(store.cleanupTimer);
+  store.cleanupTimer = setTimeout(() => {
+    sessions.delete(store.grassId);
+  }, 60 * 60 * 1000);
 }
 
-// Creates the HTTP + WebSocket server, binds to a port, shows the QR code.
-// Returns the bound server, wss, port, and caffeinate pid.
+export function emitEvent(store: SessionStore, type: string, data: Record<string, unknown>): void {
+  const seq = ++store.seq;
+  const event: StoredEvent = { seq, type, ...data };
+  store.events.push(event);
+  store.emitter.emit("event", event);
+}
+
+// --- HTTP Server ---
+
 export async function createHttpServer(opts: {
   portOverride?: number;
   caffeinate: boolean;
   network: string;
   label: string;
-}): Promise<{ server: http.Server; wss: WebSocketServer; PORT: number; caffeinatePid: number | null }> {
+}): Promise<{ server: http.Server; PORT: number; caffeinatePid: number | null }> {
   const caffeinatePid = maybeCaffeinate(opts.caffeinate);
   console.log(`  workspace: ${process.cwd()}`);
 
@@ -201,12 +222,16 @@ export async function createHttpServer(opts: {
     }
   }
 
-  const server = http.createServer((_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(html);
-  });
+  const server = http.createServer();
 
-  const wss = new WebSocketServer({ server });
+  // Serve the SPA for GET /
+  server.on("request", (req, res) => {
+    if (req.method === "GET" && (req.url === "/" || req.url === "")) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+    }
+    // All other routes handled by server.ts listener
+  });
 
   server.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
@@ -228,11 +253,9 @@ export async function createHttpServer(opts: {
     });
   });
 
-  return { server, wss, PORT, caffeinatePid };
+  return { server, PORT, caffeinatePid };
 }
 
-// Registers SIGINT/SIGTERM/exit/uncaughtException handlers.
-// cleanup() should abort in-flight work, close sockets, and close the server.
 export function setupShutdown(cleanup: () => void, caffeinatePid: number | null): void {
   const shutdown = () => {
     console.log("\nShutting down...");
@@ -249,120 +272,158 @@ export function setupShutdown(cleanup: () => void, caffeinatePid: number | null)
   });
 }
 
-// Handles the workspace-layer WebSocket messages that are identical across all agents.
-// Returns true if the message was handled, false if the agent should handle it.
-export async function handleWorkspaceMessage(
-  parsed: { type: string; [key: string]: any },
-  ws: WebSocket,
+// --- SSE helper ---
+
+export function sseHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  };
+}
+
+export function writeSseEvent(
+  res: http.ServerResponse,
+  event: StoredEvent
+): void {
+  if (res.writableEnded) return;
+  res.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+// --- Route helpers ---
+
+export function parseQuery(url: string): Record<string, string> {
+  const idx = url.indexOf("?");
+  if (idx === -1) return {};
+  const params: Record<string, string> = {};
+  for (const [k, v] of new URLSearchParams(url.slice(idx + 1))) {
+    params[k] = v;
+  }
+  return params;
+}
+
+export function parsePathParam(url: string, prefix: string): string | null {
+  const path = url.split("?")[0];
+  if (!path.startsWith(prefix)) return null;
+  return path.slice(prefix.length) || null;
+}
+
+export function jsonOk(res: http.ServerResponse, body: unknown): void {
+  const data = JSON.stringify(body);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(data);
+}
+
+export function jsonError(res: http.ServerResponse, status: number, message: string): void {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: message }));
+}
+
+export function readBody(req: http.IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+    });
+    req.on("error", reject);
+  });
+}
+
+// --- Workspace REST handlers ---
+
+export async function handleWorkspaceRoutes(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
   workspaceCwd: string,
-  state: ConnectionState,
+  availableAgents: string[],
 ): Promise<boolean> {
-  if (parsed.type === "ping") {
-    ws.send(JSON.stringify({ type: "pong" }));
+  const url = req.url ?? "/";
+  const method = req.method ?? "GET";
+  const path = url.split("?")[0];
+  const query = parseQuery(url);
+
+  if (method === "GET" && path === "/health") {
+    jsonOk(res, { status: "ok", cwd: workspaceCwd });
     return true;
   }
 
-  if (parsed.type === "list_repos") {
+  if (method === "GET" && path === "/agents") {
+    jsonOk(res, { agents: availableAgents });
+    return true;
+  }
+
+  if (method === "GET" && path === "/repos") {
     const repos = await listRepos(workspaceCwd);
-    ws.send(JSON.stringify({ type: "repos_list", repos }));
+    jsonOk(res, { repos });
     return true;
   }
 
-  if (parsed.type === "select_repo") {
-    const repoPath = parsed.path as string;
-    if (!repoPath) {
-      ws.send(JSON.stringify({ type: "error", message: "select_repo requires a path" }));
-      return true;
-    }
-    state.selectedRepoPath = repoPath;
-    const name = basename(repoPath);
-    console.log(`[workspace] selected repo: ${repoPath}`);
-    ws.send(JSON.stringify({ type: "repo_selected", path: repoPath, name }));
-    return true;
-  }
-
-  if (parsed.type === "clone_repo") {
-    const url = parsed.url as string;
-    if (!url) {
-      ws.send(JSON.stringify({ type: "error", message: "clone_repo requires a url" }));
-      return true;
-    }
-    ws.send(JSON.stringify({ type: "status", status: "cloning", message: `Cloning ${url}...` }));
+  if (method === "POST" && path === "/repos/clone") {
+    const body = await readBody(req);
+    const { url: cloneUrl } = body;
+    if (!cloneUrl) { jsonError(res, 400, "url is required"); return true; }
     try {
-      const clonedPath = cloneRepo(url, workspaceCwd);
-      state.selectedRepoPath = clonedPath;
-      const name = basename(clonedPath);
-      console.log(`[workspace] cloned repo: ${clonedPath}`);
-      ws.send(JSON.stringify({ type: "repo_cloned", path: clonedPath, name }));
+      const clonedPath = cloneRepo(cloneUrl, workspaceCwd);
+      const { basename } = await import("path");
+      jsonOk(res, { path: clonedPath, name: basename(clonedPath) });
     } catch (err: any) {
-      ws.send(JSON.stringify({ type: "error", message: `Clone failed: ${err?.message ?? "unknown error"}` }));
+      jsonError(res, 500, err?.message ?? "Clone failed");
     }
     return true;
   }
 
-  if (parsed.type === "create_folder") {
-    const name = parsed.name as string;
-    if (!name) {
-      ws.send(JSON.stringify({ type: "error", message: "create_folder requires a name" }));
-      return true;
-    }
+  if (method === "POST" && path === "/folders") {
+    const body = await readBody(req);
+    const { name } = body;
+    if (!name) { jsonError(res, 400, "name is required"); return true; }
     try {
       const createdPath = await createFolder(name, workspaceCwd);
-      state.selectedRepoPath = createdPath;
-      const folderName = basename(createdPath);
-      console.log(`[workspace] created folder: ${createdPath}`);
-      ws.send(JSON.stringify({ type: "folder_created", path: createdPath, name: folderName }));
+      const { basename } = await import("path");
+      jsonOk(res, { path: createdPath, name: basename(createdPath) });
     } catch (err: any) {
-      ws.send(JSON.stringify({ type: "error", message: `Create failed: ${err?.message ?? "unknown error"}` }));
+      jsonError(res, 500, err?.message ?? "Create failed");
     }
     return true;
   }
 
-  if (parsed.type === "list_dir") {
-    const repoRoot = (parsed.repoPath as string | undefined) || state.selectedRepoPath;
-    if (!repoRoot) {
-      ws.send(JSON.stringify({ type: "error", message: "No repo selected" }));
-      return true;
-    }
-    const targetPath = (parsed.path as string) ?? repoRoot;
+  if (method === "GET" && path === "/dir") {
+    const repoPath = query.repoPath;
+    if (!repoPath) { jsonError(res, 400, "repoPath is required"); return true; }
+    const targetPath = query.path ?? repoPath;
     try {
-      const entries = await listDir(targetPath, repoRoot);
-      ws.send(JSON.stringify({ type: "dir_listing", path: targetPath, entries }));
+      const entries = await listDir(targetPath, repoPath);
+      jsonOk(res, { entries });
     } catch (err: any) {
-      ws.send(JSON.stringify({ type: "error", message: err?.message ?? "Failed to list directory" }));
+      jsonError(res, 400, err?.message ?? "Failed to list directory");
     }
     return true;
   }
 
-  if (parsed.type === "read_file") {
-    const repoRoot = (parsed.repoPath as string | undefined) || state.selectedRepoPath;
-    if (!repoRoot) {
-      ws.send(JSON.stringify({ type: "error", message: "No repo selected" }));
-      return true;
-    }
-    const filePath = parsed.path as string;
-    if (!filePath) {
-      ws.send(JSON.stringify({ type: "error", message: "read_file requires a path" }));
-      return true;
-    }
+  if (method === "GET" && path === "/file") {
+    const repoPath = query.repoPath;
+    const filePath = query.path;
+    if (!repoPath) { jsonError(res, 400, "repoPath is required"); return true; }
+    if (!filePath) { jsonError(res, 400, "path is required"); return true; }
     try {
-      const { content, size } = await readFile(filePath, repoRoot);
-      ws.send(JSON.stringify({ type: "file_content", path: filePath, content, size }));
+      const { content, size } = await readFile(filePath, repoPath);
+      jsonOk(res, { content, size });
     } catch (err: any) {
-      ws.send(JSON.stringify({ type: "error", message: err?.message ?? "Failed to read file" }));
+      jsonError(res, 400, err?.message ?? "Failed to read file");
     }
     return true;
   }
 
-  if (parsed.type === "get_diffs") {
-    const cwd = state.selectedRepoPath ?? workspaceCwd;
+  if (method === "GET" && path === "/diffs") {
+    const repoPath = query.repoPath ?? workspaceCwd;
     let diff = "";
     try {
-      diff = execSync("git diff HEAD", { cwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+      diff = execSync("git diff HEAD", { cwd: repoPath, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
     } catch {
       diff = "";
     }
-    ws.send(JSON.stringify({ type: "diffs", diff }));
+    jsonOk(res, { diff });
     return true;
   }
 

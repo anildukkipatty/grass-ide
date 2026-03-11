@@ -127,13 +127,6 @@ export const html = `<!DOCTYPE html>
   .theme-toggle:hover { opacity: 1; }
   .theme-toggle:active { opacity: 0.7; transform: scale(0.9); }
   .theme-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .status-dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    background: #e74c3c;
-    flex-shrink: 0;
-  }
-  .status-dot.connected { background: #2ecc71; }
   /* Messages area */
   #messages {
     flex: 1;
@@ -738,7 +731,6 @@ export const html = `<!DOCTYPE html>
     .new-chat-btn svg { width: 16px; height: 16px; }
     .theme-toggle { min-height: 32px; min-width: 32px; }
     .theme-toggle svg { width: 16px; height: 16px; }
-    .status-dot { width: 8px; height: 8px; }
     #messages { padding: 16px; gap: 12px; }
     .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
     .msg.user { border-radius: 12px 12px 4px 12px; }
@@ -770,7 +762,6 @@ export const html = `<!DOCTYPE html>
 </head>
 <body>
 <div id="status-bar">
-  <div id="status-dot" class="status-dot"></div>
   <span id="status-text">Connecting...</span>
 </div>
 <div id="messages"></div>
@@ -798,7 +789,6 @@ const markedInstance = new Marked(
     emptyLangClass: "hljs",
     langPrefix: "hljs language-",
     highlight(code, lang, info) {
-      // Auto-detect unified diff format when no language is specified
       if (!lang && /^(diff --git|---\\s|\\+\\+\\+\\s|@@\\s)/m.test(code)) {
         lang = "diff";
       }
@@ -827,30 +817,6 @@ function MarkdownContent({ content }) {
     className: "md-content",
     dangerouslySetInnerHTML: { __html: html },
   });
-}
-
-const SESSIONS_KEY = "grass_sessions";
-const CURRENT_KEY = "grass_current_session";
-
-function loadSessions() {
-  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY)) || []; } catch { return []; }
-}
-function saveSessions(sessions) { localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions)); }
-function getCurrentSessionId() { return localStorage.getItem(CURRENT_KEY) || null; }
-function setCurrentSessionId(id) {
-  if (id) localStorage.setItem(CURRENT_KEY, id);
-  else localStorage.removeItem(CURRENT_KEY);
-}
-function addOrUpdateSession(id) {
-  const sessions = loadSessions();
-  const now = new Date().toISOString();
-  const idx = sessions.findIndex(s => s.id === id);
-  if (idx >= 0) {
-    sessions[idx].updatedAt = now;
-  } else {
-    sessions.push({ id, label: "Chat " + (sessions.length + 1), createdAt: now, updatedAt: now });
-  }
-  saveSessions(sessions);
 }
 
 function timeAgo(isoString) {
@@ -888,7 +854,6 @@ function parseDiff(raw) {
   const fileSections = raw.split(/^diff --git /m).filter(Boolean);
   for (const section of fileSections) {
     const lines = section.split("\\n");
-    // Extract filename from "a/path b/path"
     const headerMatch = lines[0].match(/a\\/(.*?)\\s+b\\/(.*)/);
     const filename = headerMatch ? headerMatch[2] : lines[0];
     const parsedLines = [];
@@ -968,14 +933,35 @@ function DiffView({ files, onBack }) {
   );
 }
 
+// Simple API client
+const api = {
+  async get(path) {
+    const r = await fetch(path);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+  async post(path, body) {
+    const r = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      let msg = "Request failed";
+      try { msg = (await r.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+    return r.json();
+  },
+};
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
+  const [serverReachable, setServerReachable] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [activity, setActivity] = useState(null);
-  const [sessionId, setSessionId] = useState(() => getCurrentSessionId());
+  const [sessionId, setSessionId] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
   const [permissionQueue, setPermissionQueue] = useState([]);
   const [view, setView] = useState("workspace");
@@ -985,21 +971,18 @@ function App() {
   // Workspace state
   const [repos, setRepos] = useState([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
-  const [selectedRepo, setSelectedRepo] = useState(null); // { path, name }
-  const [selectedAgent, setSelectedAgent] = useState(null); // "claude-code" | "opencode"
+  const [selectedRepo, setSelectedRepo] = useState(null);
+  const [selectedAgent, setSelectedAgent] = useState(null);
   const [cloneUrl, setCloneUrl] = useState("");
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [createError, setCreateError] = useState(null);
-  const wsRef = useRef(null);
+
+  const esRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
-  const pingIntervalRef = useRef(null);
-  const pongTimeoutRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
-  const reconnectDelayRef = useRef(1000);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1020,348 +1003,302 @@ function App() {
     setTheme(t => t === "light" ? "dark" : "light");
   }, []);
 
-  const startPing = useCallback((ws) => {
-    clearInterval(pingIntervalRef.current);
-    clearTimeout(pongTimeoutRef.current);
-
-    pingIntervalRef.current = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "ping" }));
-        pongTimeoutRef.current = setTimeout(() => {
-          console.log("Pong timeout — closing connection");
-          ws.close();
-        }, 5000);
-      }
-    }, 30000);
-  }, []);
-
-  const stopPing = useCallback(() => {
-    clearInterval(pingIntervalRef.current);
-    clearTimeout(pongTimeoutRef.current);
-  }, []);
-
+  // On mount: ping server to check reachability and load repos
   useEffect(() => {
-    let connectTimeout = null;
-
-    function connect() {
-      clearTimeout(reconnectTimeoutRef.current);
-      clearTimeout(connectTimeout);
-      let ws = new WebSocket(\`ws://\${window.location.host}\`);
-      wsRef.current = ws;
-
-      // If the upgrade doesn't complete within 5s, kill and retry
-      connectTimeout = setTimeout(() => {
-        if (ws.readyState === WebSocket.CONNECTING) {
-          console.log("WebSocket connect timeout — retrying");
-          ws.close();
-        }
-      }, 5000);
-
-      ws.onopen = () => {
-        clearTimeout(connectTimeout);
-        setConnected(true);
-        setReconnecting(false);
-        reconnectDelayRef.current = 1000;
-        startPing(ws);
-        // Load workspace repo list on connect
+    api.get("/agents")
+      .then(() => {
+        setServerReachable(true);
         setLoadingRepos(true);
-        ws.send(JSON.stringify({ type: "list_repos" }));
-        setTimeout(() => textareaRef.current?.focus(), 0);
-      };
-
-      ws.onclose = () => {
-        clearTimeout(connectTimeout);
-        setConnected(false);
-        setPermissionQueue([]);
-        stopPing();
-        const delay = reconnectDelayRef.current;
-        reconnectDelayRef.current = Math.min(delay * 2, 30000);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          setReconnecting(true);
-          connect();
-        }, delay);
-      };
-
-      ws.onerror = () => ws.close();
-
-      ws.onmessage = (event) => {
-        let data;
-        try { data = JSON.parse(event.data); } catch { return; }
-
-        if (data.type === "pong") {
-          clearTimeout(pongTimeoutRef.current);
-          return;
-        }
-
-        if (data.type === "repos_list") {
-          setRepos(data.repos || []);
-          setLoadingRepos(false);
-          return;
-        }
-
-        if (data.type === "repo_selected") {
-          setSelectedRepo({ path: data.path, name: data.name });
-          return;
-        }
-
-        if (data.type === "repo_cloned") {
-          setSelectedRepo({ path: data.path, name: data.name });
-          setCloning(false);
-          setCloneUrl("");
-          setCloneError(null);
-          setSelectedAgent(null);
-          setView("agent_picker");
-          return;
-        }
-
-        if (data.type === "folder_created") {
-          setSelectedRepo({ path: data.path, name: data.name });
-          setCreatingFolder(false);
-          setNewFolderName("");
-          setCreateError(null);
-          setRepos(prev => [...prev, { path: data.path, name: data.name, isGit: false }]);
-          setSelectedAgent(null);
-          setView("agent_picker");
-          return;
-        }
-
-        if (data.type === "sessions_list") {
-          setSessionsList(data.sessions || []);
-          setLoadingSessions(false);
-          return;
-        }
-
-        if (data.type === "diffs") {
-          setDiffFiles(parseDiff(data.diff || ""));
-          return;
-        }
-
-        if (data.type === "session_status") {
-          setStreaming(data.streaming);
-          if (data.streaming) {
-            setActivity({ label: "Working..." });
-          }
-          return;
-        }
-
-        if (data.type === "permission_request") {
-          setPermissionQueue(prev => {
-            // Deduplicate by toolUseID
-            if (prev.some(p => p.toolUseID === data.toolUseID)) return prev;
-            return [...prev, {
-              toolUseID: data.toolUseID,
-              toolName: data.toolName,
-              input: data.input,
-            }];
-          });
-          return;
-        }
-
-        if (data.type === "system" && data.subtype === "init" && data.data?.session_id) {
-          const sid = data.data.session_id;
-          setCurrentSessionId(sid);
-          addOrUpdateSession(sid);
-          setSessionId(sid);
-          return;
-        }
-
-        if (data.type === "history") {
-          setMessages(data.messages.map((m, i) => ({
-            role: m.role,
-            content: m.content,
-            complete: true,
-            msgId: "history-" + i,
-          })));
-          return;
-        }
-
-        if (data.type === "assistant") {
-          setActivity(null);
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === "assistant" && !last.complete && last.msgId === data.id) {
-              return [...prev.slice(0, -1), { ...last, content: data.content }];
-            }
-            return [...prev, { role: "assistant", content: data.content, complete: false, msgId: data.id }];
-          });
-        } else if (data.type === "status") {
-          if (data.status === "thinking") {
-            setActivity({ label: "Thinking" });
-          } else if (data.status === "tool") {
-            const elapsed = data.elapsed != null ? Math.round(data.elapsed) + "s" : "";
-            setActivity({ label: data.tool_name + (elapsed ? " (" + elapsed + ")" : "") });
-          } else if (data.status === "tool_summary") {
-            setActivity({ label: data.summary });
-          } else {
-            setActivity(null);
-          }
-        } else if (data.type === "tool_use") {
-          setActivity({ label: data.tool_name + ": " + data.tool_input });
-        } else if (data.type === "result") {
-          setStreaming(false);
-          setActivity(null);
-          setMessages(prev => {
-            const cost = data.cost != null ? "$" + data.cost.toFixed(4) : null;
-            const duration = data.duration_ms != null ? (data.duration_ms / 1000).toFixed(1) + "s" : null;
-            const badge = [cost, duration].filter(Boolean).join(" \u00B7 ");
-            const lastIdx = prev.length - 1;
-            return prev.map((msg, i) =>
-              msg.role === "assistant" && !msg.complete
-                ? { ...msg, complete: true, ...(i === lastIdx ? { badge } : {}) }
-                : msg
-            );
-          });
-          setTimeout(() => textareaRef.current?.focus(), 0);
-        } else if (data.type === "aborted") {
-          setStreaming(false);
-          setActivity(null);
-          setMessages(prev => [...prev, { role: "error", content: "\u26A0\uFE0F " + data.message }]);
-        } else if (data.type === "error") {
-          // If we're cloning, show clone error inline
-          if (cloning) {
-            setCloning(false);
-            setCloneError(data.message);
-            return;
-          }
-          // If we're creating a folder, show create error inline
-          if (creatingFolder) {
-            setCreatingFolder(false);
-            setCreateError(data.message);
-            return;
-          }
-          setStreaming(false);
-          setActivity(null);
-          setMessages(prev => [...prev, { role: "error", content: data.message }]);
-        }
-      };
-    }
-
-    connect();
-    return () => {
-      stopPing();
-      clearTimeout(connectTimeout);
-      clearTimeout(reconnectTimeoutRef.current);
-      wsRef.current?.close();
-    };
+        return api.get("/repos");
+      })
+      .then(data => {
+        setRepos(data.repos || []);
+        setLoadingRepos(false);
+      })
+      .catch(() => {
+        setServerReachable(false);
+      });
   }, []);
 
-  const send = useCallback(() => {
+  const closeEventSource = useCallback(() => {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+  }, []);
+
+  const openEventSource = useCallback((sid) => {
+    closeEventSource();
+    const es = new EventSource("/events?sessionId=" + encodeURIComponent(sid));
+    esRef.current = es;
+
+    es.addEventListener("assistant", (e) => {
+      const data = JSON.parse(e.data);
+      setActivity(null);
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === "assistant" && !last.complete) {
+          return [...prev.slice(0, -1), { ...last, content: data.content }];
+        }
+        return [...prev, { role: "assistant", content: data.content, complete: false }];
+      });
+    });
+
+    es.addEventListener("status", (e) => {
+      const data = JSON.parse(e.data);
+      if (data.status === "thinking") {
+        setActivity({ label: "Thinking" });
+      } else if (data.status === "tool") {
+        const elapsed = data.elapsed != null ? Math.round(data.elapsed) + "s" : "";
+        setActivity({ label: data.tool_name + (elapsed ? " (" + elapsed + ")" : "") });
+      } else if (data.status === "tool_summary") {
+        setActivity({ label: data.summary });
+      } else {
+        setActivity(null);
+      }
+    });
+
+    es.addEventListener("tool_use", (e) => {
+      const data = JSON.parse(e.data);
+      setActivity({ label: data.tool_name + ": " + data.tool_input });
+    });
+
+    es.addEventListener("permission_request", (e) => {
+      const data = JSON.parse(e.data);
+      setPermissionQueue(prev => {
+        if (prev.some(p => p.toolUseID === data.toolUseID)) return prev;
+        return [...prev, { toolUseID: data.toolUseID, toolName: data.toolName, input: data.input }];
+      });
+    });
+
+    es.addEventListener("result", (e) => {
+      const data = JSON.parse(e.data);
+      setStreaming(false);
+      setActivity(null);
+      setMessages(prev => {
+        const cost = data.cost != null ? "$" + data.cost.toFixed(4) : null;
+        const duration = data.duration_ms != null ? (data.duration_ms / 1000).toFixed(1) + "s" : null;
+        const badge = [cost, duration].filter(Boolean).join(" \\u00B7 ");
+        const lastIdx = prev.length - 1;
+        return prev.map((msg, i) =>
+          msg.role === "assistant" && !msg.complete
+            ? { ...msg, complete: true, ...(i === lastIdx ? { badge } : {}) }
+            : msg
+        );
+      });
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    });
+
+    es.addEventListener("aborted", (e) => {
+      const data = JSON.parse(e.data);
+      setStreaming(false);
+      setActivity(null);
+      setMessages(prev => [...prev, { role: "error", content: "\\u26A0\\uFE0F " + data.message }]);
+    });
+
+    const handleErrorEvent = (e) => {
+      if (!e.data) return;
+      try {
+        const data = JSON.parse(e.data);
+        setStreaming(false);
+        setActivity(null);
+        setMessages(prev => [...prev, { role: "error", content: data.message }]);
+      } catch {}
+    };
+    es.addEventListener("error_event", handleErrorEvent);
+    es.addEventListener("error", handleErrorEvent);
+    es.addEventListener("agent_error", handleErrorEvent);
+
+    es.addEventListener("done", () => {
+      es.close();
+      esRef.current = null;
+      setStreaming(false);
+      setActivity(null);
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.role === "assistant" && !msg.complete
+            ? { ...msg, complete: true }
+            : msg
+        )
+      );
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    });
+
+    es.onerror = () => {
+      // EventSource auto-reconnects with Last-Event-ID; nothing to do
+    };
+  }, [closeEventSource]);
+
+  const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || !connected || streaming) return;
+    if (!text || !serverReachable || streaming) return;
     setMessages(prev => [...prev, { role: "user", content: text }]);
-    wsRef.current.send(JSON.stringify({ type: "message", content: text }));
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setStreaming(true);
     setActivity({ label: "Thinking" });
-  }, [input, connected, streaming]);
 
-  const abort = useCallback(() => {
-    if (!connected || !streaming) return;
-    wsRef.current.send(JSON.stringify({ type: "abort" }));
+    try {
+      const result = await api.post("/chat", {
+        repoPath: selectedRepo?.path,
+        agent: selectedAgent,
+        prompt: text,
+        sessionId: sessionId || undefined,
+      });
+      const sid = result.sessionId;
+      setSessionId(sid);
+      openEventSource(sid);
+    } catch (err) {
+      setStreaming(false);
+      setActivity(null);
+      setMessages(prev => [...prev, { role: "error", content: err.message }]);
+    }
+  }, [input, serverReachable, streaming, selectedRepo, selectedAgent, sessionId, openEventSource]);
+
+  const abort = useCallback(async () => {
+    if (!streaming || !sessionId) return;
     setPermissionQueue([]);
-  }, [connected, streaming]);
+    try {
+      await api.post("/sessions/" + sessionId + "/abort", {});
+    } catch {}
+  }, [streaming, sessionId]);
 
   const newChat = useCallback(() => {
-    setCurrentSessionId(null);
+    closeEventSource();
     setSessionId(null);
     setMessages([]);
     setActivity(null);
+    setStreaming(false);
+    setPermissionQueue([]);
     setView("chat");
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "init" }));
-    }
-  }, []);
+  }, [closeEventSource]);
 
-  const selectSession = useCallback((id) => {
-    setCurrentSessionId(id);
+  const selectSession = useCallback(async (id) => {
+    closeEventSource();
     setSessionId(id);
     setMessages([]);
     setActivity(null);
+    setStreaming(false);
+    setPermissionQueue([]);
     setView("chat");
-    // Send init to load history for this session
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "init", sessionId: id }));
-    }
-  }, []);
+
+    try {
+      const data = await api.get("/sessions/" + id + "/history?agent=" + (selectedAgent || "") + "&repoPath=" + encodeURIComponent(selectedRepo?.path || ""));
+      if (data.messages && data.messages.length > 0) {
+        setMessages(data.messages.map((m, i) => ({
+          role: m.role,
+          content: m.content,
+          complete: true,
+          msgId: "history-" + i,
+        })));
+      }
+      // Check if session is still streaming
+      const status = await api.get("/sessions/" + id + "/status");
+      if (status.streaming) {
+        setStreaming(true);
+        openEventSource(id);
+      }
+    } catch {}
+  }, [closeEventSource, selectedAgent, selectedRepo, openEventSource]);
 
   const showWorkspace = useCallback(() => {
     setView("workspace");
-    // Refresh repo list
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      setLoadingRepos(true);
-      wsRef.current.send(JSON.stringify({ type: "list_repos" }));
-    }
+    setLoadingRepos(true);
+    api.get("/repos").then(data => {
+      setRepos(data.repos || []);
+      setLoadingRepos(false);
+    }).catch(() => setLoadingRepos(false));
   }, []);
 
   const handleSelectRepo = useCallback((repo) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "select_repo", path: repo.path }));
-    }
     setSelectedRepo({ path: repo.path, name: repo.name });
     setSelectedAgent(null);
     setView("agent_picker");
   }, []);
 
-  const handleSelectAgent = useCallback((agent) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "select_agent", agent }));
-    }
+  const handleSelectAgent = useCallback(async (agent) => {
     setSelectedAgent(agent);
-    // Load sessions for the selected repo + agent
     setLoadingSessions(true);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "list_sessions" }));
-    }
     setView("picker");
-  }, []);
+    try {
+      const data = await api.get("/sessions?agent=" + agent + "&repoPath=" + encodeURIComponent(selectedRepo?.path || ""));
+      setSessionsList(data.sessions || []);
+    } catch {
+      setSessionsList([]);
+    }
+    setLoadingSessions(false);
+  }, [selectedRepo]);
 
-  const handleClone = useCallback(() => {
+  const handleClone = useCallback(async () => {
     const url = cloneUrl.trim();
     if (!url || cloning) return;
     setCloning(true);
     setCloneError(null);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "clone_repo", url }));
+    try {
+      const data = await api.post("/repos/clone", { url });
+      setSelectedRepo({ path: data.path, name: data.name });
+      setCloning(false);
+      setCloneUrl("");
+      setSelectedAgent(null);
+      setView("agent_picker");
+    } catch (err) {
+      setCloning(false);
+      setCloneError(err.message);
     }
   }, [cloneUrl, cloning]);
 
-  const handleCreateFolder = useCallback(() => {
+  const handleCreateFolder = useCallback(async () => {
     const name = newFolderName.trim();
     if (!name || creatingFolder) return;
     setCreatingFolder(true);
     setCreateError(null);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "create_folder", name }));
+    try {
+      const data = await api.post("/folders", { name });
+      setSelectedRepo({ path: data.path, name: data.name });
+      setCreatingFolder(false);
+      setNewFolderName("");
+      setRepos(prev => [...prev, { path: data.path, name: data.name, isGit: false }]);
+      setSelectedAgent(null);
+      setView("agent_picker");
+    } catch (err) {
+      setCreatingFolder(false);
+      setCreateError(err.message);
     }
   }, [newFolderName, creatingFolder]);
 
-  const showPicker = useCallback(() => {
+  const showPicker = useCallback(async () => {
     setView("picker");
-    // Re-fetch session list
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      setLoadingSessions(true);
-      wsRef.current.send(JSON.stringify({ type: "list_sessions" }));
+    setLoadingSessions(true);
+    try {
+      const data = await api.get("/sessions?agent=" + (selectedAgent || "") + "&repoPath=" + encodeURIComponent(selectedRepo?.path || ""));
+      setSessionsList(data.sessions || []);
+    } catch {
+      setSessionsList([]);
     }
-  }, []);
+    setLoadingSessions(false);
+  }, [selectedAgent, selectedRepo]);
 
-  const showDiffs = useCallback(() => {
+  const showDiffs = useCallback(async () => {
     setView("diffs");
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "get_diffs" }));
+    try {
+      const data = await api.get("/diffs?repoPath=" + encodeURIComponent(selectedRepo?.path || ""));
+      setDiffFiles(parseDiff(data.diff || ""));
+    } catch {
+      setDiffFiles([]);
     }
-  }, []);
+  }, [selectedRepo]);
 
-  const respondPermission = useCallback((approved) => {
-    if (permissionQueue.length === 0 || !wsRef.current) return;
+  const respondPermission = useCallback(async (approved) => {
+    if (permissionQueue.length === 0 || !sessionId) return;
     const current = permissionQueue[0];
-    wsRef.current.send(JSON.stringify({
-      type: "permission_response",
-      toolUseID: current.toolUseID,
-      approved,
-    }));
     setPermissionQueue(prev => prev.slice(1));
-  }, [permissionQueue]);
+    try {
+      await api.post("/sessions/" + sessionId + "/permission", {
+        toolUseID: current.toolUseID,
+        approved,
+      });
+    } catch {}
+  }, [permissionQueue, sessionId]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1376,7 +1313,11 @@ function App() {
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
   }, []);
 
-  const disabled = !connected || streaming;
+  const disabled = !serverReachable || streaming;
+
+  const themeToggleHtml = theme === "light"
+    ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 
   if (view === "diffs") {
     return React.createElement(DiffView, { files: diffFiles, onBack: () => setView("chat") });
@@ -1386,9 +1327,8 @@ function App() {
     return (
       <>
         <div id="status-bar">
-          <div className={"status-dot" + (connected ? " connected" : "")} />
-          <span>{connected ? "Workspace" : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
-          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} style={{ marginLeft: "auto" }} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
+          <span>{serverReachable ? "Workspace" : "Connecting..."}</span>
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} style={{ marginLeft: "auto" }} dangerouslySetInnerHTML={{ __html: themeToggleHtml }} />
         </div>
         <div className="workspace-picker">
           <div className="workspace-picker-header">
@@ -1452,10 +1392,9 @@ function App() {
     return (
       <>
         <div id="status-bar">
-          <div className={"status-dot" + (connected ? " connected" : "")} />
-          <span>{connected ? (selectedRepo ? selectedRepo.name : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+          <span>{selectedRepo ? selectedRepo.name : "Workspace"}</span>
           <button className="sessions-btn" onClick={showWorkspace} style={{ marginLeft: "auto" }}>← Repos</button>
-          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: themeToggleHtml }} />
         </div>
         <div className="session-picker">
           <div className="session-picker-header">
@@ -1480,10 +1419,9 @@ function App() {
     return (
       <>
         <div id="status-bar">
-          <div className={"status-dot" + (connected ? " connected" : "")} />
-          <span>{connected ? (selectedRepo ? selectedRepo.name : "Connected") : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+          <span>{selectedRepo ? selectedRepo.name : "Workspace"}</span>
           <button className="sessions-btn" onClick={showWorkspace} style={{ marginLeft: "auto" }}>← Repos</button>
-          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
+          <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: themeToggleHtml }} />
         </div>
         <div className="session-picker">
           <div className="session-picker-header">
@@ -1515,12 +1453,11 @@ function App() {
   return (
     <>
       <div id="status-bar">
-        <div className={"status-dot" + (connected ? " connected" : "")} />
-        <span>{connected ? (streaming ? "Streaming..." : (selectedRepo ? selectedRepo.name : "Connected")) : (reconnecting ? "Reconnecting..." : "Connecting...")}</span>
+        <span>{streaming ? "Streaming..." : (selectedRepo ? selectedRepo.name : "Connected")}</span>
         <button className="sessions-btn" onClick={showDiffs}>Diffs</button>
         <button className="sessions-btn" onClick={showPicker} disabled={streaming}>Sessions</button>
         <button className="new-chat-btn" onClick={newChat} disabled={streaming} title="New Chat" dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' }} />
-        <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: theme === "light" ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' }} />
+        <button className="theme-toggle" onClick={cycleTheme} title={"Theme: " + theme} dangerouslySetInnerHTML={{ __html: themeToggleHtml }} />
       </div>
       <div id="messages">
         {messages.map((msg, i) => (
@@ -1549,11 +1486,11 @@ function App() {
         />
         {streaming ? (
           <button onClick={abort} className="abort" aria-label="Abort">
-            \u25A0
+            \\u25A0
           </button>
         ) : (
           <button onClick={send} disabled={disabled || !input.trim()} aria-label="Send">
-            \u2191
+            \\u2191
           </button>
         )}
       </div>
