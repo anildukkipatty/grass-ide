@@ -1,6 +1,6 @@
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createReadStream, existsSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { readdir, stat } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
@@ -246,6 +246,16 @@ export async function loadTranscript(
 
 async function getSessionPreview(filePath: string): Promise<string> {
   try {
+    try {
+      const line = execFileSync("grep", ["-m1", '"custom-title"', filePath], { encoding: "utf-8" }).trim();
+      const entry = JSON.parse(line);
+      if (entry.type === "custom-title" && typeof entry.customTitle === "string" && entry.customTitle.trim()) {
+        return entry.customTitle.trim();
+      }
+    } catch {
+      // no custom-title entry found, fall through to preview
+    }
+
     const rl = createInterface({
       input: createReadStream(filePath, { encoding: "utf-8" }),
       crlfDelay: Infinity,
