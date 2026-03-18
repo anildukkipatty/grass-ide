@@ -4,7 +4,7 @@ import http from "node:http";
 import { EventEmitter } from "events";
 import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
-import { listRepos, cloneRepo, createFolder, listDir, readFile } from "./workspace";
+import { listRepos, cloneRepo, createFolder, listDir, readFile, getRepoDetails } from "./workspace";
 
 export const PORT_RANGE_START = 32100;
 export const PORT_RANGE_END = 32199;
@@ -357,6 +357,18 @@ export async function handleWorkspaceRoutes(
   if (method === "GET" && path === "/repos") {
     const repos = await listRepos(workspaceCwd);
     jsonOk(res, { repos });
+    return true;
+  }
+
+  if (method === "GET" && path === "/repos/details") {
+    const repoPath = query.repoPath;
+    if (!repoPath) { jsonError(res, 400, "repoPath is required"); return true; }
+    try {
+      const details = getRepoDetails(repoPath);
+      jsonOk(res, details);
+    } catch (err: any) {
+      jsonError(res, 500, err?.message ?? "Failed to get repo details");
+    }
     return true;
   }
 

@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { mkdir, readdir, stat, readFile as fsReadFile } from "fs/promises";
-import { join, resolve } from "path";
+import { join, resolve, extname } from "path";
 import { execSync } from "child_process";
 
 export interface RepoInfo {
@@ -26,6 +26,53 @@ export async function listRepos(workspaceDir: string): Promise<RepoInfo[]> {
   } catch {
     return [];
   }
+}
+
+export interface LastCommit {
+  message: string;
+  hash: string;
+  timestamp: number; // unix seconds
+}
+
+export interface RepoDetails {
+  branch: string | null;
+  lastCommit: LastCommit | null;
+  dominantLanguage: string | null;
+}
+
+export function getRepoDetails(repoPath: string): RepoDetails {
+  // Branch
+  let branch: string | null = null;
+  try {
+    branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: repoPath, encoding: "utf-8", stdio: "pipe" }).trim();
+  } catch { /* not a git repo or no commits */ }
+
+  // Last commit
+  let lastCommit: LastCommit | null = null;
+  try {
+    const raw = execSync("git log -1 --format=%s|%H|%ct", { cwd: repoPath, encoding: "utf-8", stdio: "pipe" }).trim();
+    const [message, hash, ct] = raw.split("|");
+    if (hash) {
+      lastCommit = { message: message ?? "", hash, timestamp: parseInt(ct ?? "0", 10) };
+    }
+  } catch { /* empty repo or no commits */ }
+
+  // Dominant language via git ls-files (fast, respects .gitignore)
+  let dominantLanguage: string | null = null;
+  try {
+    const files = execSync("git ls-files -z", { cwd: repoPath, encoding: "utf-8", stdio: "pipe" });
+    const counts = new Map<string, number>();
+    for (const file of files.split("\0")) {
+      const ext = extname(file).toLowerCase().slice(1);
+      if (!ext) continue;
+      counts.set(ext, (counts.get(ext) ?? 0) + 1);
+    }
+    if (counts.size > 0) {
+      dominantLanguage = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    }
+  } catch { /* not a git repo */ }
+
+  return { branch, lastCommit, dominantLanguage };
 }
 
 // Create a new empty folder in workspaceDir; returns the absolute path
