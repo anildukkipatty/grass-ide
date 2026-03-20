@@ -182,11 +182,12 @@ export function createSession(
   return store;
 }
 
-export function scheduleCleanup(store: SessionStore): void {
-  if (store.cleanupTimer) clearTimeout(store.cleanupTimer);
-  store.cleanupTimer = setTimeout(() => {
-    sessions.delete(store.grassId);
-  }, 60 * 60 * 1000);
+export function scheduleCleanup(_store: SessionStore): void {
+  // Session cleanup disabled — sessions are kept in memory indefinitely
+  // if (store.cleanupTimer) clearTimeout(store.cleanupTimer);
+  // store.cleanupTimer = setTimeout(() => {
+  //   sessions.delete(store.grassId);
+  // }, 60 * 60 * 1000);
 }
 
 export function emitEvent(store: SessionStore, type: string, data: Record<string, unknown>): void {
