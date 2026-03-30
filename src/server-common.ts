@@ -160,6 +160,43 @@ export interface SessionStore {
 
 export const sessions = new Map<string, SessionStore>();
 
+// --- Global permissions stream ---
+
+export const permissionsEmitter = new EventEmitter();
+
+export interface PermissionDumpItem {
+  sessionId: string;
+  agent: "claude-code" | "opencode";
+  repoPath: string;
+  repoName: string;
+  toolUseID: string;
+  toolName: string;
+  input: any;
+}
+
+export function buildPermissionsDump(): PermissionDumpItem[] {
+  const items: PermissionDumpItem[] = [];
+  for (const store of sessions.values()) {
+    const repoName = store.repoPath.split("/").filter(Boolean).pop() ?? store.repoPath;
+    for (const perm of store.pendingPermissions.values()) {
+      items.push({
+        sessionId: store.grassId,
+        agent: store.agent,
+        repoPath: store.repoPath,
+        repoName,
+        toolUseID: perm.toolUseID,
+        toolName: perm.toolName,
+        input: perm.input,
+      });
+    }
+  }
+  return items;
+}
+
+export function notifyPermissionsChanged(): void {
+  permissionsEmitter.emit("update", buildPermissionsDump());
+}
+
 export function createSession(
   grassId: string,
   agent: "claude-code" | "opencode",

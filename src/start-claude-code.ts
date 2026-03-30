@@ -8,6 +8,7 @@ import { homedir } from "os";
 import {
   emitEvent,
   scheduleCleanup,
+  notifyPermissionsChanged,
   type SessionStore,
 } from "./server-common";
 
@@ -39,12 +40,14 @@ export async function runAgent(store: SessionStore): Promise<void> {
           console.log(`[canUseTool] tool=${toolName} id=${toolUseID} reason=${decisionReason}`);
           return new Promise((resolve) => {
             store.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
+            notifyPermissionsChanged();
             emitEvent(store, "permission_request", { toolUseID, toolName, input });
 
             signal.addEventListener("abort", () => {
               const p = store.pendingPermissions.get(toolUseID);
               if (p) {
                 store.pendingPermissions.delete(toolUseID);
+                notifyPermissionsChanged();
                 p.resolve({ behavior: "deny", message: "Request aborted" });
               }
             }, { once: true });

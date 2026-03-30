@@ -15,6 +15,9 @@ import {
   jsonOk,
   jsonError,
   readBody,
+  permissionsEmitter,
+  buildPermissionsDump,
+  notifyPermissionsChanged,
 } from "./server-common";
 import { initAgent as initClaudeCode, runAgent as runClaudeCode, listSessions as listClaudeSessions, loadTranscript } from "./start-claude-code";
 import { initAgent as initOpencode, runAgent as runOpencode, listSessions as listOpencodeSessions, getSessionHistory, abortSession as opencodeAbort, respondPermission as opencodePermission } from "./start-opencode";
@@ -152,6 +155,7 @@ export async function start(network: string = "local", portOverride?: number, ca
           const pending = store.pendingPermissions.get(toolUseID);
           if (pending) {
             store.pendingPermissions.delete(toolUseID);
+            notifyPermissionsChanged();
             pending.resolve(approved
               ? { behavior: "allow", updatedInput: pending.input }
               : { behavior: "deny", message: "User denied" }
@@ -161,6 +165,7 @@ export async function start(network: string = "local", portOverride?: number, ca
           const pending = store.pendingPermissions.get(toolUseID);
           if (pending) {
             store.pendingPermissions.delete(toolUseID);
+            notifyPermissionsChanged();
             await opencodePermission(store.sdkSessionId, toolUseID, approved, store.repoPath).catch((err: any) => {
               console.error("Permission response failed:", err.message);
             });
@@ -259,6 +264,26 @@ export async function start(network: string = "local", portOverride?: number, ca
 
         req.on("close", () => {
           store.emitter.off("event", listener);
+        });
+
+        return;
+      }
+
+      // GET /permissions/events — global stream of all pending permissions across all sessions
+      if (method === "GET" && path === "/permissions/events") {
+        res.writeHead(200, sseHeaders());
+
+        const sendDump = (permissions: ReturnType<typeof buildPermissionsDump>) => {
+          if (res.writableEnded) return;
+          res.write(`event: permissions\ndata: ${JSON.stringify({ permissions })}\n\n`);
+        };
+
+        // Send current state immediately
+        sendDump(buildPermissionsDump());
+
+        permissionsEmitter.on("update", sendDump);
+        req.on("close", () => {
+          permissionsEmitter.off("update", sendDump);
         });
 
         return;

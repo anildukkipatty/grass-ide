@@ -3,6 +3,7 @@ import {
   emitEvent,
   scheduleCleanup,
   sessions,
+  notifyPermissionsChanged,
   type SessionStore,
 } from "./server-common";
 
@@ -289,6 +290,7 @@ async function startEventStream(client: any, directory: string) {
             toolName,
             toolUseID: permId,
           });
+          notifyPermissionsChanged();
           emitEvent(store, "permission_request", { toolUseID: permId, toolName, input });
         }
       }
