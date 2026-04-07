@@ -94,12 +94,26 @@ export async function runAgent(store: SessionStore): Promise<void> {
     sdkIdToGrassId.set(store.sdkSessionId!, store.grassId);
 
     console.log(`[query] sending prompt to opencode session ${store.sdkSessionId}`);
+    console.log(`[query] requested model: ${store.model ?? "default"}`);
+
+    // Parse model string into providerID/modelID if provided
+    let modelParam: { providerID: string; modelID: string } | undefined;
+    if (store.model) {
+      const slashIdx = store.model.indexOf("/");
+      if (slashIdx !== -1) {
+        modelParam = {
+          providerID: store.model.slice(0, slashIdx),
+          modelID: store.model.slice(slashIdx + 1),
+        };
+      }
+    }
 
     // Use promptAsync so the request returns immediately; completion signaled via event stream
     const promptResult = await client.session.promptAsync({
       path: { id: store.sdkSessionId! },
       body: {
         parts: [{ type: "text", text: prompt }],
+        ...(modelParam ? { model: modelParam } : {}),
       },
     });
     if (promptResult.error) {
@@ -221,6 +235,9 @@ async function startEventStream(client: any, directory: string) {
         if (info?.id && info?.role) {
           if (!(store as any)._msgRoles) (store as any)._msgRoles = new Map<string, string>();
           (store as any)._msgRoles.set(info.id, info.role);
+          if (info.role === "assistant" && info.providerID && info.modelID) {
+            console.log(`[query] opencode model: ${info.providerID}/${info.modelID}`);
+          }
         }
       }
 

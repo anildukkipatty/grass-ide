@@ -30,8 +30,8 @@ export async function runAgent(store: SessionStore): Promise<void> {
     const q = query({
       prompt: [...store.events].reverse().find(e => e.type === "user_prompt")?.prompt as string ?? "",
       options: {
-        model: "claude-opus-4-6",
-        permissionMode: "default",
+        model: store.model ?? "claude-sonnet-4-6",
+        permissionMode: store.permissionMode ?? "default",
         abortController,
         includePartialMessages: true,
         cwd: store.repoPath,

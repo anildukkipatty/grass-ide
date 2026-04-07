@@ -115,7 +115,12 @@ export async function start(network: string = "local", portOverride?: number, ca
       // GET /sessions/:id/status
       const statusId = parsePathParam(path, "/sessions/")?.replace(/\/status$/, "");
       if (method === "GET" && path.endsWith("/status") && statusId) {
-        const store = sessions.get(statusId);
+        console.log(`[status] looking up statusId=${statusId}`);
+        console.log(`[status] sessions in memory: ${[...sessions.keys()].join(", ") || "(none)"}`);
+        console.log(`[status] sdkSessionIds in memory: ${[...sessions.values()].map(s => s.sdkSessionId).join(", ") || "(none)"}`);
+        const store = sessions.get(statusId)
+          ?? [...sessions.values()].find(s => s.sdkSessionId === statusId);
+        console.log(`[status] store found: ${!!store}`);
         if (!store) { jsonError(res, 404, "Session not found"); return; }
         jsonOk(res, { streaming: store.status === "running" });
         return;
@@ -124,7 +129,8 @@ export async function start(network: string = "local", portOverride?: number, ca
       // POST /sessions/:id/abort
       const abortId = parsePathParam(path, "/sessions/")?.replace(/\/abort$/, "");
       if (method === "POST" && path.endsWith("/abort") && abortId) {
-        const store = sessions.get(abortId);
+        const store = sessions.get(abortId)
+          ?? [...sessions.values()].find(s => s.sdkSessionId === abortId);
         if (!store) { jsonError(res, 404, "Session not found"); return; }
         if (store.status !== "running") { jsonOk(res, { ok: true }); return; }
         if (store.agent === "claude-code" && store.abortController) {
@@ -178,7 +184,7 @@ export async function start(network: string = "local", portOverride?: number, ca
       // POST /chat
       if (method === "POST" && path === "/chat") {
         const body = await readBody(req);
-        const { repoPath, agent, prompt, sessionId: existingId } = body;
+        const { repoPath, agent, prompt, sessionId: existingId, model, permissionMode } = body;
 
         if (!repoPath) { jsonError(res, 400, "repoPath is required"); return; }
         if (!prompt) { jsonError(res, 400, "prompt is required"); return; }
@@ -205,7 +211,7 @@ export async function start(network: string = "local", portOverride?: number, ca
           emitEvent(store, 'user_prompt', { prompt });
         } else {
           const grassId = existingId ?? randomUUID();
-          store = createSession(grassId, agent, repoPath);
+          store = createSession(grassId, agent, repoPath, model, permissionMode);
           // If resuming a known session (from disk), tell the SDK to resume it
           if (existingId) {
             store.sdkSessionId = existingId;
@@ -233,7 +239,8 @@ export async function start(network: string = "local", portOverride?: number, ca
         const sessionId = query.sessionId;
         if (!sessionId) { jsonError(res, 400, "sessionId is required"); return; }
 
-        const store = sessions.get(sessionId);
+        const store = sessions.get(sessionId)
+          ?? [...sessions.values()].find(s => s.sdkSessionId === sessionId);
         if (!store) { jsonError(res, 404, "Session not found"); return; }
 
         const lastSeq = parseInt(req.headers["last-event-id"] as string ?? "0", 10) || 0;

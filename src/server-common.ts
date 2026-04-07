@@ -149,6 +149,8 @@ export interface SessionStore {
   sdkSessionId: string | null;
   agent: "claude-code" | "opencode";
   repoPath: string;
+  model?: string;
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
   seq: number;
   events: StoredEvent[];
   status: "running" | "done" | "error";
@@ -166,6 +168,7 @@ export const permissionsEmitter = new EventEmitter();
 
 export interface PermissionDumpItem {
   sessionId: string;
+  sdkSessionId: string | null;
   agent: "claude-code" | "opencode";
   repoPath: string;
   repoName: string;
@@ -181,6 +184,7 @@ export function buildPermissionsDump(): PermissionDumpItem[] {
     for (const perm of store.pendingPermissions.values()) {
       items.push({
         sessionId: store.grassId,
+        sdkSessionId: store.sdkSessionId,
         agent: store.agent,
         repoPath: store.repoPath,
         repoName,
@@ -200,13 +204,17 @@ export function notifyPermissionsChanged(): void {
 export function createSession(
   grassId: string,
   agent: "claude-code" | "opencode",
-  repoPath: string
+  repoPath: string,
+  model?: string,
+  permissionMode?: SessionStore["permissionMode"]
 ): SessionStore {
   const store: SessionStore = {
     grassId,
     sdkSessionId: null,
     agent,
     repoPath,
+    model,
+    permissionMode,
     seq: 0,
     events: [],
     status: "running",
