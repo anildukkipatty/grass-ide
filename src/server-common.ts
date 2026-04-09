@@ -150,7 +150,7 @@ export interface SessionStore {
   agent: "claude-code" | "opencode";
   repoPath: string;
   model?: string;
-  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
+  mode?: "plan" | "build";
   seq: number;
   events: StoredEvent[];
   status: "running" | "done" | "error";
@@ -206,7 +206,7 @@ export function createSession(
   agent: "claude-code" | "opencode",
   repoPath: string,
   model?: string,
-  permissionMode?: SessionStore["permissionMode"]
+  mode?: SessionStore["mode"]
 ): SessionStore {
   const store: SessionStore = {
     grassId,
@@ -214,7 +214,7 @@ export function createSession(
     agent,
     repoPath,
     model,
-    permissionMode,
+    mode,
     seq: 0,
     events: [],
     status: "running",

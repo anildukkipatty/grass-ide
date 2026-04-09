@@ -27,11 +27,13 @@ export async function runAgent(store: SessionStore): Promise<void> {
   store.abortController = abortController;
 
   try {
+    console.log(`[query] requested model: ${store.model ?? "claude-sonnet-4-6 (default)"}`);
+    let modelLogged = false;
     const q = query({
       prompt: [...store.events].reverse().find(e => e.type === "user_prompt")?.prompt as string ?? "",
       options: {
         model: store.model ?? "claude-sonnet-4-6",
-        permissionMode: store.permissionMode ?? "default",
+        permissionMode: store.mode === "plan" ? "plan" : "default",
         abortController,
         includePartialMessages: true,
         cwd: store.repoPath,
@@ -63,6 +65,11 @@ export async function runAgent(store: SessionStore): Promise<void> {
           if (newSdkId && !store.sdkSessionId) {
             store.sdkSessionId = newSdkId;
           }
+        }
+
+        if (!modelLogged && msg.type === "assistant" && (msg as any).message?.model) {
+          console.log(`[query] claude code model: ${(msg as any).message.model}`);
+          modelLogged = true;
         }
 
         const payload = formatMessage(msg);
@@ -199,7 +206,7 @@ function extractText(content: unknown): string {
 export async function loadTranscript(
   sessionId: string,
   cwd: string
-): Promise<{ role: string; content: string }[]> {
+): Promise<{ role: string; content: any[] }[]> {
   const encodedCwd = cwd.replace(/[/\\]/g, "-");
   const transcriptPath = join(
     homedir(),
@@ -211,7 +218,7 @@ export async function loadTranscript(
 
   if (!existsSync(transcriptPath)) return [];
 
-  const messages: { role: string; content: string }[] = [];
+  const messages: { role: string; content: any[] }[] = [];
 
   try {
     const rl = createInterface({
@@ -229,13 +236,36 @@ export async function loadTranscript(
       }
 
       if (entry.type === "user" && entry.userType === "external" && !entry.isMeta) {
-        const text = extractText(entry.message?.content);
-        if (text) messages.push({ role: "user", content: text });
+        const rawContent = entry.message?.content;
+        const blocks: any[] = [];
+        if (typeof rawContent === "string") {
+          if (rawContent) blocks.push({ type: "text", text: rawContent });
+        } else if (Array.isArray(rawContent)) {
+          for (const b of rawContent) {
+            if (b.type === "text" && b.text) blocks.push({ type: "text", text: b.text });
+          }
+        }
+        if (blocks.length) messages.push({ role: "user", content: blocks });
       }
 
       if (entry.type === "assistant") {
-        const text = extractText(entry.message?.content);
-        if (text) messages.push({ role: "assistant", content: text });
+        const rawContent = entry.message?.content;
+        const blocks: any[] = [];
+        if (Array.isArray(rawContent)) {
+          for (const b of rawContent) {
+            if (b.type === "text" && b.text) blocks.push({ type: "text", text: b.text });
+            else if (b.type === "tool_use") {
+              let tool_input: string;
+              try {
+                tool_input = formatToolInput(b.name, b.input);
+              } catch {
+                tool_input = JSON.stringify(b.input) ?? "";
+              }
+              blocks.push({ type: "tool_use", tool_name: b.name, tool_input });
+            }
+          }
+        }
+        if (blocks.length) messages.push({ role: "assistant", content: blocks });
       }
     }
 
@@ -340,7 +370,7 @@ function formatToolInput(toolName: string, input: Record<string, unknown>): stri
     case "Read":
       return `${input.file_path}`;
     case "Write":
-      return `${input.file_path} (${(input.content as string).length} chars)`;
+      return `${input.file_path} (${typeof input.content === "string" ? input.content.length : "?"} chars)`;
     case "Edit":
       return `${input.file_path}`;
     case "Glob":
@@ -356,7 +386,8 @@ function formatToolInput(toolName: string, input: Record<string, unknown>): stri
     case "NotebookEdit":
       return `${input.notebook_path} (${input.edit_mode || "replace"})`;
     case "TodoWrite": {
-      const todos = input.todos as { content: string; status: string }[];
+      const todos = input.todos as { content: string; status: string }[] | null | undefined;
+      if (!Array.isArray(todos)) return JSON.stringify(input);
       return todos.map((t) => `[${t.status}] ${t.content}`).join(", ");
     }
     default:

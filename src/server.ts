@@ -184,7 +184,7 @@ export async function start(network: string = "local", portOverride?: number, ca
       // POST /chat
       if (method === "POST" && path === "/chat") {
         const body = await readBody(req);
-        const { repoPath, agent, prompt, sessionId: existingId, model, permissionMode } = body;
+        const { repoPath, agent, prompt, sessionId: existingId, model, mode } = body;
 
         if (!repoPath) { jsonError(res, 400, "repoPath is required"); return; }
         if (!prompt) { jsonError(res, 400, "prompt is required"); return; }
@@ -208,10 +208,12 @@ export async function start(network: string = "local", portOverride?: number, ca
           store.status = "running";
           store.events = [];
           store.seq = 0;
+          if (model) store.model = model;
+          if (mode) store.mode = mode;
           emitEvent(store, 'user_prompt', { prompt });
         } else {
           const grassId = existingId ?? randomUUID();
-          store = createSession(grassId, agent, repoPath, model, permissionMode);
+          store = createSession(grassId, agent, repoPath, model, mode);
           // If resuming a known session (from disk), tell the SDK to resume it
           if (existingId) {
             store.sdkSessionId = existingId;

@@ -89,6 +89,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
       const sessionDir = (sessionResult.data as any).directory;
       console.log(`[query] created opencode session ${sdkId}, directory: ${sessionDir}`);
       store.sdkSessionId = sdkId;
+      emitEvent(store, "system", { subtype: "init", session_id: sdkId });
     }
     // Always register the mapping so event stream can find the store
     sdkIdToGrassId.set(store.sdkSessionId!, store.grassId);
@@ -114,6 +115,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
       body: {
         parts: [{ type: "text", text: prompt }],
         ...(modelParam ? { model: modelParam } : {}),
+        ...(store.mode ? { agent: store.mode } : {}),
       },
     });
     if (promptResult.error) {
@@ -134,22 +136,35 @@ export async function runAgent(store: SessionStore): Promise<void> {
   }
 }
 
-export async function getSessionHistory(sdkSessionId: string, directory: string = ""): Promise<{ role: string; content: string }[]> {
+export async function getSessionHistory(sdkSessionId: string, directory: string = ""): Promise<{ role: string; content: any[] }[]> {
   const client = await getClientForDir(directory);
   try {
     const messagesResult = await client.session.messages({ path: { id: sdkSessionId } });
-    const history: { role: string; content: string }[] = [];
-    for (const msg of messagesResult.data ?? []) {
+    const allMsgs = messagesResult.data ?? [];
+    const history: { role: string; content: any[] }[] = [];
+    for (const msg of allMsgs) {
       const role = (msg as any).info?.role;
+      const parts = (msg as any).parts ?? [];
       if (role === "user" || role === "assistant") {
-        const parts = (msg as any).parts ?? [];
-        const text = parts
-          .filter((p: any) => p.type === "text")
-          .map((p: any) => p.text)
-          .join("");
-        if (text) history.push({ role, content: text });
+        const blocks: any[] = [];
+        for (const p of parts) {
+          if (p.type === "text" && p.text) blocks.push({ type: "text", text: p.text });
+          else if (p.type === "tool") {
+            const toolName = p.tool ?? "";
+            const input = p.state?.input;
+            let tool_input: string;
+            try {
+              tool_input = JSON.stringify(input) ?? "";
+            } catch {
+              tool_input = "";
+            }
+            blocks.push({ type: "tool_use", tool_name: toolName, tool_input });
+          }
+        }
+        if (blocks.length) history.push({ role, content: blocks });
       }
     }
+    console.log(`[getSessionHistory] loaded ${history.length} messages`);
     return history;
   } catch (err: any) {
     console.error("Error loading opencode history:", err.message);
