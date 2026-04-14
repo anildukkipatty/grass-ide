@@ -28,6 +28,7 @@ GRASS_CONFIG_DIR="$HOME_DIR/.config/grass"
 GRASS_ENV_FILE="$GRASS_CONFIG_DIR/env"
 GRASS_PORT=3000
 GRASS_LOG="$GRASS_CONFIG_DIR/grass.log"
+RELAY_URL="wss://relay.codeongrass.com"
 
 # --- Create workspace folder -------------------------------------------------
 echo ""
@@ -67,7 +68,7 @@ echo "Env file written and locked to owner-read-only."
 # --- Register cron @reboot entry (idempotent) --------------------------------
 echo ""
 echo "==> Registering cron @reboot entry"
-(crontab -l 2>/dev/null | grep -v 'grass' || true; echo "@reboot nohup bash -c \"cd '$GRASS_WORKSPACE' && grass start -p $GRASS_PORT\" >> $GRASS_LOG 2>&1 &") | crontab -
+(crontab -l 2>/dev/null | grep -v 'grass' || true; echo "@reboot nohup bash -c \"cd '$GRASS_WORKSPACE' && grass start -p $GRASS_PORT -r $RELAY_URL\" >> $GRASS_LOG 2>&1 &") | crontab -
 echo "Cron entry registered."
 
 # --- Kill any existing grass process and start fresh -------------------------
@@ -75,7 +76,7 @@ echo ""
 echo "==> Starting grass"
 pkill -x grass 2>/dev/null || true
 sleep 1
-nohup bash -c "cd '$GRASS_WORKSPACE' && grass start -p $GRASS_PORT" >> "$GRASS_LOG" 2>&1 &
+nohup bash -c "cd '$GRASS_WORKSPACE' && grass start -p $GRASS_PORT -r $RELAY_URL" >> "$GRASS_LOG" 2>&1 &
 echo "grass started (pid $!)"
 
 # --- Health check ------------------------------------------------------------
