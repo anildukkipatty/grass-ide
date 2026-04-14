@@ -27,7 +27,6 @@ export async function runAgent(store: SessionStore): Promise<void> {
   store.abortController = abortController;
 
   try {
-    console.log(`[query] requested model: ${store.model ?? "claude-sonnet-4-6 (default)"}`);
     let modelLogged = false;
     const q = query({
       prompt: [...store.events].reverse().find(e => e.type === "user_prompt")?.prompt as string ?? "",
@@ -38,8 +37,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
         includePartialMessages: true,
         cwd: store.repoPath,
         ...(store.sdkSessionId ? { resume: store.sdkSessionId } : {}),
-        canUseTool: (toolName, input, { signal, toolUseID, decisionReason }) => {
-          console.log(`[canUseTool] tool=${toolName} id=${toolUseID} reason=${decisionReason}`);
+        canUseTool: (toolName, input, { signal, toolUseID }) => {
           return new Promise((resolve) => {
             store.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
             notifyPermissionsChanged();
@@ -68,7 +66,6 @@ export async function runAgent(store: SessionStore): Promise<void> {
         }
 
         if (!modelLogged && msg.type === "assistant" && (msg as any).message?.model) {
-          console.log(`[query] claude code model: ${(msg as any).message.model}`);
           modelLogged = true;
         }
 
@@ -269,7 +266,6 @@ export async function loadTranscript(
       }
     }
 
-    console.log(`Loaded ${messages.length} messages from transcript`);
     return messages;
   } catch (err: any) {
     console.error("Error reading transcript:", err.message);

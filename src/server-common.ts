@@ -6,7 +6,30 @@ import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
 import { listRepos, cloneRepo, createFolder, listDir, readFile, getRepoDetails } from "./workspace";
 
-const SERVER_VERSION: string = require("../../package.json").version;
+// --- Transport abstractions ---
+// These interfaces cover the exact surface area that route handlers use.
+// Both http.IncomingMessage/ServerResponse and the relay adapters satisfy them structurally.
+
+export interface IRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string | string[] | undefined>;
+  on(event: "close", listener: () => void): this;
+  on(event: "data", listener: (chunk: Buffer | string) => void): this;
+  on(event: "end", listener: () => void): this;
+  on(event: "error", listener: (err: Error) => void): this;
+  on(event: string, listener: (...args: any[]) => void): this;
+}
+
+export interface IResponse {
+  headersSent: boolean;
+  writableEnded: boolean;
+  writeHead(statusCode: number, headers?: Record<string, string>): void;
+  write(chunk: string): void;
+  end(chunk?: string): void;
+}
+
+const SERVER_VERSION: string = require("../package.json").version;
 // Semver range of client app versions this server build can service.
 // Raise the floor when a breaking protocol change makes old clients incompatible.
 const CLIENT_VERSION_RANGE = ">=1.0.0";
@@ -104,6 +127,18 @@ export async function showQR(network: string, port: number): Promise<void> {
     });
   });
 
+  console.log(qrCode);
+}
+
+export async function showRelayQR(relayBaseUrl: string, token: string): Promise<void> {
+  // Convert ws(s):// to http(s):// for the app-facing URL
+  const appUrl = relayBaseUrl.replace(/^ws(s?):\/\//, "http$1://") + `/s/${token}`;
+  console.log(`\n  Relay  ${appUrl}\n`);
+  const qrCode = await new Promise<string>((resolve) => {
+    qrcode.generate(appUrl, { small: true }, (code: string) => {
+      resolve(code.trimEnd());
+    });
+  });
   console.log(qrCode);
 }
 
@@ -335,7 +370,7 @@ export function sseHeaders(): Record<string, string> {
 }
 
 export function writeSseEvent(
-  res: http.ServerResponse,
+  res: IResponse,
   event: StoredEvent
 ): void {
   if (res.writableEnded) return;
@@ -360,18 +395,18 @@ export function parsePathParam(url: string, prefix: string): string | null {
   return path.slice(prefix.length) || null;
 }
 
-export function jsonOk(res: http.ServerResponse, body: unknown): void {
+export function jsonOk(res: IResponse, body: unknown): void {
   const data = JSON.stringify(body);
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(data);
 }
 
-export function jsonError(res: http.ServerResponse, status: number, message: string): void {
+export function jsonError(res: IResponse, status: number, message: string): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: message }));
 }
 
-export function readBody(req: http.IncomingMessage): Promise<any> {
+export function readBody(req: IRequest): Promise<any> {
   return new Promise((resolve, reject) => {
     let raw = "";
     req.on("data", (chunk) => { raw += chunk; });
@@ -385,8 +420,8 @@ export function readBody(req: http.IncomingMessage): Promise<any> {
 // --- Workspace REST handlers ---
 
 export async function handleWorkspaceRoutes(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IRequest,
+  res: IResponse,
   workspaceCwd: string,
   availableAgents: string[],
 ): Promise<boolean> {

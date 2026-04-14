@@ -29,7 +29,6 @@ const permissionConfig = {
 } as const;
 
 export async function initAgent(): Promise<boolean> {
-  console.log("  Starting opencode server...");
   const loaded = await loadOpencodeSdk().catch(() => null) as any;
 
   if (!loaded?.createOpencode || !loaded?.createOpencodeClient) {
@@ -43,9 +42,8 @@ export async function initAgent(): Promise<boolean> {
     const result = await loaded.createOpencode({ config: { permission: permissionConfig } });
     // Seed the default client (no directory) from the spawned server's client
     clientsByDir.set("", result.client);
-    console.log("  opencode server ready (spawned), permissions: ask mode enabled");
+    console.log("  opencode: ready");
   } catch {
-    console.log("  opencode server already running");
   }
 
   return true;
@@ -64,7 +62,6 @@ async function getClientForDir(directory: string): Promise<any> {
     await client.config.update({
       body: { ...currentConfig, permission: permissionConfig },
     });
-    console.log(`  permissions: ask mode enabled (dir: ${directory})`);
   } catch (err: any) {
     console.warn("  permissions: could not set permission config:", err?.message);
   }
@@ -87,15 +84,12 @@ export async function runAgent(store: SessionStore): Promise<void> {
       });
       const sdkId = (sessionResult.data as any).id as string;
       const sessionDir = (sessionResult.data as any).directory;
-      console.log(`[query] created opencode session ${sdkId}, directory: ${sessionDir}`);
       store.sdkSessionId = sdkId;
       emitEvent(store, "system", { subtype: "init", session_id: sdkId });
     }
     // Always register the mapping so event stream can find the store
     sdkIdToGrassId.set(store.sdkSessionId!, store.grassId);
 
-    console.log(`[query] sending prompt to opencode session ${store.sdkSessionId}`);
-    console.log(`[query] requested model: ${store.model ?? "default"}`);
 
     // Parse model string into providerID/modelID if provided
     let modelParam: { providerID: string; modelID: string } | undefined;
@@ -126,7 +120,6 @@ export async function runAgent(store: SessionStore): Promise<void> {
       scheduleCleanup(store);
       return;
     }
-    console.log(`[query] promptAsync accepted, waiting for events`);
     // completion signaled via event stream (session.idle or session.status idle)
   } catch (err: any) {
     console.error("[query] error:", err.message);
@@ -164,7 +157,6 @@ export async function getSessionHistory(sdkSessionId: string, directory: string 
         if (blocks.length) history.push({ role, content: blocks });
       }
     }
-    console.log(`[getSessionHistory] loaded ${history.length} messages`);
     return history;
   } catch (err: any) {
     console.error("Error loading opencode history:", err.message);
@@ -179,7 +171,6 @@ export async function listSessions(
   try {
     const listOptions = repoPath ? { query: { directory: repoPath } } : undefined;
     const result = await client.session.list(listOptions);
-    console.log(`[list_sessions] got ${(result.data ?? []).length} sessions (dir: ${repoPath ?? "default"})`);
     const sessionList = (result.data ?? []).map((s: any) => ({
       id: s.id,
       preview: s.title || s.id,
@@ -235,8 +226,6 @@ async function startEventStream(client: any, directory: string) {
     for await (const event of events.stream) {
       const type = event.type as string;
       const props = event.properties as any;
-      const logTypes = new Set(["message.updated", "message.part.updated", "session.status", "permission.asked", "permission.replied"]);
-      if (logTypes.has(type)) console.log(`[event-stream] ${type}: ${JSON.stringify(props).slice(0, 500)}`);
 
       const sdkSessionId = extractSessionId(type, props);
       if (!sdkSessionId) continue;
@@ -250,9 +239,6 @@ async function startEventStream(client: any, directory: string) {
         if (info?.id && info?.role) {
           if (!(store as any)._msgRoles) (store as any)._msgRoles = new Map<string, string>();
           (store as any)._msgRoles.set(info.id, info.role);
-          if (info.role === "assistant" && info.providerID && info.modelID) {
-            console.log(`[query] opencode model: ${info.providerID}/${info.modelID}`);
-          }
         }
       }
 

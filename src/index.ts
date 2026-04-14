@@ -37,8 +37,12 @@ program
   .option("-n, --network <type>", "network for QR code: local, tailscale, or remote-ip", "local")
   .option("-p, --port <number>", "port to listen on (default: auto-select from 32100–32199)", parseInt)
   .option("-c, --caffeinate", "run caffeinate for 8 hours to prevent sleep")
+  .option("-r, --relay <url>", "connect to a relay server instead of binding a local port (e.g. wss://relay.example.com)")
   .action(async (opts) => {
-    await start(opts.network, opts.port, opts.caffeinate ?? false);
+    if (opts.relay && (opts.network !== "local" || opts.port !== undefined)) {
+      console.warn("  warning: -n and -p are ignored in relay mode");
+    }
+    await start(opts.network, opts.port, opts.caffeinate ?? false, opts.relay);
   });
 
 program.parse();
