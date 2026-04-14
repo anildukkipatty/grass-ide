@@ -153,7 +153,7 @@ export async function start(network: string = "local", portOverride?: number, ca
         const store = sessions.get(permBase);
         if (!store) { jsonError(res, 404, "Session not found"); return; }
         const body = await readBody(req);
-        const { toolUseID, approved } = body;
+        const { toolUseID, approved, updatedInput } = body;
         if (!toolUseID) { jsonError(res, 400, "toolUseID is required"); return; }
         console.log(`[permission] id=${toolUseID} approved=${approved}`);
 
@@ -163,7 +163,7 @@ export async function start(network: string = "local", portOverride?: number, ca
             store.pendingPermissions.delete(toolUseID);
             notifyPermissionsChanged();
             pending.resolve(approved
-              ? { behavior: "allow", updatedInput: pending.input }
+              ? { behavior: "allow", updatedInput: updatedInput ?? pending.input }
               : { behavior: "deny", message: "User denied" }
             );
           }

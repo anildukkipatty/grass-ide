@@ -6,6 +6,11 @@ import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
 import { listRepos, cloneRepo, createFolder, listDir, readFile, getRepoDetails } from "./workspace";
 
+const SERVER_VERSION: string = require("../../package.json").version;
+// Semver range of client app versions this server build can service.
+// Raise the floor when a breaking protocol change makes old clients incompatible.
+const CLIENT_VERSION_RANGE = ">=1.0.0";
+
 export const PORT_RANGE_START = 32100;
 export const PORT_RANGE_END = 32199;
 
@@ -391,7 +396,7 @@ export async function handleWorkspaceRoutes(
   const query = parseQuery(url);
 
   if (method === "GET" && path === "/health") {
-    jsonOk(res, { status: "ok", cwd: workspaceCwd });
+    jsonOk(res, { status: "ok", cwd: workspaceCwd, serverVersion: SERVER_VERSION, clientVersionRange: CLIENT_VERSION_RANGE });
     return true;
   }
 
