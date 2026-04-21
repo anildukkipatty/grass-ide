@@ -11,6 +11,7 @@ import {
   notifyPermissionsChanged,
   notifyNewPermission,
   notifySessionDone,
+  shouldAutoApprove,
   type SessionStore,
 } from "./server-common";
 
@@ -41,6 +42,12 @@ export async function runAgent(store: SessionStore): Promise<void> {
         ...(store.sdkSessionId ? { resume: store.sdkSessionId } : {}),
         canUseTool: (toolName, input, { signal, toolUseID }) => {
           return new Promise((resolve) => {
+            console.log(`[canUseTool] tool="${toolName}" mode="${store.permissionMode}" autoApprove=${shouldAutoApprove(store.agent, toolName, store.permissionMode)}`);
+            if (shouldAutoApprove(store.agent, toolName, store.permissionMode)) {
+              resolve({ behavior: "allow", updatedInput: input });
+              return;
+            }
+
             store.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
             notifyNewPermission(toolName);
             emitEvent(store, "permission_request", { toolUseID, toolName, input });
@@ -207,7 +214,7 @@ export async function loadTranscript(
   sessionId: string,
   cwd: string
 ): Promise<{ role: string; content: any[] }[]> {
-  const encodedCwd = cwd.replace(/[/\\]/g, "-");
+  const encodedCwd = cwd.replace(/[/\\_]/g, "-");
   const transcriptPath = join(
     homedir(),
     ".claude",
@@ -331,7 +338,7 @@ async function getSessionPreview(filePath: string): Promise<string> {
 export async function listSessions(
   cwd: string
 ): Promise<{ id: string; preview: string; updatedAt: string }[]> {
-  const encodedCwd = cwd.replace(/[/\\]/g, "-");
+  const encodedCwd = cwd.replace(/[/\\_]/g, "-");
   const projectDir = join(homedir(), ".claude", "projects", encodedCwd);
 
   if (!existsSync(projectDir)) return [];

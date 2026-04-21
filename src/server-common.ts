@@ -184,6 +184,27 @@ export interface PendingPermission {
   toolUseID: string;
 }
 
+export type PermissionMode = "ask-permissions" | "allow-all-edits" | "yolo";
+
+export const EDIT_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
+
+export const TOOL_BLACKLIST: Record<"claude-code" | "opencode", Set<string>> = {
+  "claude-code": new Set(["ExitPlanMode", "AskUserQuestion"]),
+  "opencode": new Set(),
+};
+
+export function shouldAutoApprove(
+  agent: "claude-code" | "opencode",
+  toolName: string,
+  mode: PermissionMode
+): boolean {
+  if (mode === "ask-permissions") return false;
+  if (TOOL_BLACKLIST[agent].has(toolName)) return false;
+  if (mode === "yolo") return true;
+  if (mode === "allow-all-edits") return EDIT_TOOLS.has(toolName);
+  return false;
+}
+
 export interface SessionStore {
   grassId: string;
   sdkSessionId: string | null;
@@ -191,6 +212,7 @@ export interface SessionStore {
   repoPath: string;
   model?: string;
   mode?: "plan" | "build";
+  permissionMode: PermissionMode;
   seq: number;
   events: StoredEvent[];
   status: "running" | "done" | "error";
@@ -300,7 +322,8 @@ export function createSession(
   agent: "claude-code" | "opencode",
   repoPath: string,
   model?: string,
-  mode?: SessionStore["mode"]
+  mode?: SessionStore["mode"],
+  permissionMode?: PermissionMode
 ): SessionStore {
   const store: SessionStore = {
     grassId,
@@ -309,6 +332,7 @@ export function createSession(
     repoPath,
     model,
     mode,
+    permissionMode: permissionMode ?? "ask-permissions",
     seq: 0,
     events: [],
     status: "running",

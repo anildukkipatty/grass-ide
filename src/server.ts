@@ -6,6 +6,7 @@ import {
   maybeCaffeinate,
   handleWorkspaceRoutes,
   createSession,
+  shouldAutoApprove,
   sessions,
   emitEvent,
   scheduleCleanup,
@@ -21,6 +22,7 @@ import {
   notifyPermissionsChanged,
   IRequest,
   IResponse,
+  type PermissionMode,
 } from "./server-common";
 import { initAgent as initClaudeCode, runAgent as runClaudeCode, listSessions as listClaudeSessions, loadTranscript } from "./start-claude-code";
 import { initAgent as initOpencode, runAgent as runOpencode, listSessions as listOpencodeSessions, getSessionHistory, abortSession as opencodeAbort, respondPermission as opencodePermission } from "./start-opencode";
@@ -41,7 +43,7 @@ export async function handleRequest(
   if (method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID, X-Client-Version, X-Daytona-Skip-Preview-Warning",
     });
     res.end();
@@ -97,6 +99,23 @@ export async function handleRequest(
         const history = await loadTranscript(store.sdkSessionId ?? historyId, store.repoPath);
         jsonOk(res, { messages: history });
       }
+      return;
+    }
+
+    // GET /sessions/:id/config
+    const configId = parsePathParam(path, "/sessions/")?.replace(/\/config$/, "");
+    if (method === "GET" && path.endsWith("/config") && configId) {
+      const store = sessions.get(configId)
+        ?? [...sessions.values()].find(s => s.sdkSessionId === configId);
+      if (!store) { jsonError(res, 404, "Session not found"); return; }
+      jsonOk(res, {
+        grassId: store.grassId,
+        sessionId: store.sdkSessionId,
+        agent: store.agent,
+        model: store.model ?? null,
+        mode: store.mode ?? null,
+        permissionMode: store.permissionMode,
+      });
       return;
     }
 
@@ -167,7 +186,7 @@ export async function handleRequest(
     // POST /chat
     if (method === "POST" && path === "/chat") {
       const body = await readBody(req);
-      const { repoPath, agent, prompt, sessionId: existingId, model, mode } = body;
+      const { repoPath, agent, prompt, sessionId: existingId, model, mode, permissionMode } = body;
 
       if (!repoPath) { jsonError(res, 400, "repoPath is required"); return; }
       if (!prompt) { jsonError(res, 400, "prompt is required"); return; }
@@ -192,10 +211,11 @@ export async function handleRequest(
         store.seq = 0;
         if (model) store.model = model;
         if (mode) store.mode = mode;
+        if (permissionMode) store.permissionMode = permissionMode as PermissionMode;
         emitEvent(store, 'user_prompt', { prompt });
       } else {
         const grassId = existingId ?? randomUUID();
-        store = createSession(grassId, agent, repoPath, model, mode);
+        store = createSession(grassId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined);
         if (existingId) {
           store.sdkSessionId = existingId;
         }
@@ -273,6 +293,43 @@ export async function handleRequest(
         permissionsEmitter.off("update", sendDump);
       });
 
+      return;
+    }
+
+    // PATCH /sessions/:id — update session settings mid-run
+    if (method === "PATCH" && path.startsWith("/sessions/")) {
+      const sessionId = path.slice("/sessions/".length);
+      const store = sessions.get(sessionId);
+      if (!store) { jsonError(res, 404, "Session not found"); return; }
+
+      const body = await readBody(req);
+      if (body.permissionMode !== undefined) {
+        const valid: PermissionMode[] = ["ask-permissions", "allow-all-edits", "yolo"];
+        if (!valid.includes(body.permissionMode)) {
+          jsonError(res, 400, "Invalid permissionMode"); return;
+        }
+        store.permissionMode = body.permissionMode as PermissionMode;
+
+        if (store.agent === "claude-code") {
+          for (const [id, perm] of store.pendingPermissions) {
+            if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
+              store.pendingPermissions.delete(id);
+              perm.resolve({ behavior: "allow", updatedInput: perm.input });
+            }
+          }
+          notifyPermissionsChanged();
+        } else if (store.agent === "opencode" && store.sdkSessionId) {
+          for (const [id, perm] of store.pendingPermissions) {
+            if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
+              store.pendingPermissions.delete(id);
+              await opencodePermission(store.sdkSessionId, id, true, store.repoPath).catch(() => {});
+            }
+          }
+          notifyPermissionsChanged();
+        }
+      }
+
+      jsonOk(res, { sessionId: store.grassId, permissionMode: store.permissionMode });
       return;
     }
 
