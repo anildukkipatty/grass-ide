@@ -252,21 +252,30 @@ export function setPushNotificationSender(
 }
 
 export function sendPushViaRelay(title: string, body: string, data: Record<string, unknown>): void {
-  if (!_pushSender) {
-    console.log("[push] SKIP: no push sender set (not in relay mode or WS not connected)");
-    return;
-  }
-  console.log(`[push] sending: title="${title}" body="${body}"`);
-  _pushSender(title, body, data);
+  _pushSender?.(title, body, data);
 }
 
 export function notifyNewPermission(toolName: string): void {
   notifyPermissionsChanged();
-  sendPushViaRelay(
-    "Permission required",
-    `Grass wants to use ${toolName}. Tap to review.`,
-    { type: "permission" }
-  );
+  if (permissionsEmitter.listenerCount("update") === 0) {
+    sendPushViaRelay(
+      "Permission required",
+      `Grass wants to use ${toolName}. Tap to review.`,
+      { type: "permission" }
+    );
+  } else {
+    // SSE listener exists but may be stale (iOS keeps connections alive after backgrounding).
+    // Wait 5s — if the permission is still pending the user hasn't responded, so push.
+    setTimeout(() => {
+      if (buildPermissionsDump().length > 0) {
+        sendPushViaRelay(
+          "Permission required",
+          `Grass wants to use ${toolName}. Tap to review.`,
+          { type: "permission" }
+        );
+      }
+    }, 10000);
+  }
 }
 
 export function createSession(
