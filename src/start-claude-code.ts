@@ -9,6 +9,7 @@ import {
   emitEvent,
   scheduleCleanup,
   notifyPermissionsChanged,
+  notifyNewPermission,
   type SessionStore,
 } from "./server-common";
 
@@ -40,7 +41,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
         canUseTool: (toolName, input, { signal, toolUseID }) => {
           return new Promise((resolve) => {
             store.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
-            notifyPermissionsChanged();
+            notifyNewPermission(toolName);
             emitEvent(store, "permission_request", { toolUseID, toolName, input });
 
             signal.addEventListener("abort", () => {

@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { randomBytes } from "crypto";
 import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { showRelayQR } from "./server-common";
+import { showRelayQR, setPushNotificationSender } from "./server-common";
 import { handleRequest } from "./server";
 import type { IRequest, IResponse } from "./server-common";
 import type { RelayToGrassFrame, GrassToRelayFrame } from "./relay-types";
@@ -152,6 +152,11 @@ export async function startRelayMode(
       backoff = BACKOFF_INITIAL_MS;
       const registerFrame: GrassToRelayFrame = { type: "register", token };
       ws.send(JSON.stringify(registerFrame));
+      setPushNotificationSender((title, body, data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "push_notification", title, body, data } satisfies GrassToRelayFrame));
+        }
+      });
     });
 
     ws.on("message", async (raw) => {
@@ -204,6 +209,7 @@ export async function startRelayMode(
     });
 
     ws.on("close", () => {
+      setPushNotificationSender(null);
       // Notify all active SSE listeners so they detach from the session emitter
       for (const [id, req] of activeRequests) {
         req.emitClose();

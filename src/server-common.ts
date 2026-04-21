@@ -241,6 +241,33 @@ export function notifyPermissionsChanged(): void {
   permissionsEmitter.emit("update", buildPermissionsDump());
 }
 
+// --- Push notification bridge (avoids circular import with relay-client) ---
+
+let _pushSender: ((title: string, body: string, data: Record<string, unknown>) => void) | null = null;
+
+export function setPushNotificationSender(
+  fn: ((title: string, body: string, data: Record<string, unknown>) => void) | null
+): void {
+  _pushSender = fn;
+}
+
+export function sendPushViaRelay(title: string, body: string, data: Record<string, unknown>): void {
+  _pushSender?.(title, body, data);
+}
+
+// Replaces notifyPermissionsChanged() at permission-add sites.
+// Also sends a push when no SSE listeners are connected (app is in background).
+export function notifyNewPermission(toolName: string): void {
+  notifyPermissionsChanged();
+  if (permissionsEmitter.listenerCount("update") === 0) {
+    sendPushViaRelay(
+      "Permission required",
+      `Grass wants to use ${toolName}. Tap to review.`,
+      { type: "permission" }
+    );
+  }
+}
+
 export function createSession(
   grassId: string,
   agent: "claude-code" | "opencode",

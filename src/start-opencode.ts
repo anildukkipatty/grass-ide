@@ -4,6 +4,7 @@ import {
   scheduleCleanup,
   sessions,
   notifyPermissionsChanged,
+  notifyNewPermission,
   type SessionStore,
 } from "./server-common";
 
@@ -308,7 +309,7 @@ async function startEventStream(client: any, directory: string) {
             toolName,
             toolUseID: permId,
           });
-          notifyPermissionsChanged();
+          notifyNewPermission(toolName);
           emitEvent(store, "permission_request", { toolUseID: permId, toolName, input });
         }
       }

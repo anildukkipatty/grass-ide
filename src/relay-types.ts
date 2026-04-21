@@ -11,3 +11,4 @@ export type GrassToRelayFrame =
   | { requestId: string; type: "data"; chunk: string }
   | { requestId: string; type: "end" }
   | { requestId: string; type: "error"; message: string }
+  | { type: "push_notification"; title: string; body: string; data: Record<string, unknown> }
