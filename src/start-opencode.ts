@@ -5,6 +5,7 @@ import {
   sessions,
   notifyPermissionsChanged,
   notifyNewPermission,
+  shouldAutoApprove,
   type SessionStore,
 } from "./server-common";
 
@@ -303,14 +304,19 @@ async function startEventStream(client: any, directory: string) {
         }
 
         if (permId) {
-          store.pendingPermissions.set(permId, {
-            resolve: () => {},
-            input,
-            toolName,
-            toolUseID: permId,
-          });
-          notifyNewPermission(toolName);
-          emitEvent(store, "permission_request", { toolUseID: permId, toolName, input });
+<<<<<<< HEAD
+          if (shouldAutoApprove(store.agent, toolName, store.permissionMode)) {
+            respondPermission(store.sdkSessionId!, permId, true, store.repoPath).catch(() => {});
+          } else {
+            store.pendingPermissions.set(permId, {
+              resolve: () => {},
+              input,
+              toolName,
+              toolUseID: permId,
+            });
+            notifyNewPermission(toolName);
+            emitEvent(store, "permission_request", { toolUseID: permId, toolName, input });
+          }
         }
       }
 

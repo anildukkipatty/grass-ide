@@ -10,6 +10,7 @@ import {
   scheduleCleanup,
   notifyPermissionsChanged,
   notifyNewPermission,
+  shouldAutoApprove,
   type SessionStore,
 } from "./server-common";
 
@@ -40,6 +41,12 @@ export async function runAgent(store: SessionStore): Promise<void> {
         ...(store.sdkSessionId ? { resume: store.sdkSessionId } : {}),
         canUseTool: (toolName, input, { signal, toolUseID }) => {
           return new Promise((resolve) => {
+            console.log(`[canUseTool] tool="${toolName}" mode="${store.permissionMode}" autoApprove=${shouldAutoApprove(store.agent, toolName, store.permissionMode)}`);
+            if (shouldAutoApprove(store.agent, toolName, store.permissionMode)) {
+              resolve({ behavior: "allow", updatedInput: input });
+              return;
+            }
+
             store.pendingPermissions.set(toolUseID, { resolve, input, toolName, toolUseID });
             notifyNewPermission(toolName);
             emitEvent(store, "permission_request", { toolUseID, toolName, input });
