@@ -259,13 +259,11 @@ export function sendPushViaRelay(title: string, body: string, data: Record<strin
 // Also sends a push when no SSE listeners are connected (app is in background).
 export function notifyNewPermission(toolName: string): void {
   notifyPermissionsChanged();
-  if (permissionsEmitter.listenerCount("update") === 0) {
-    sendPushViaRelay(
-      "Permission required",
-      `Grass wants to use ${toolName}. Tap to review.`,
-      { type: "permission" }
-    );
-  }
+  sendPushViaRelay(
+    "Permission required",
+    `Grass wants to use ${toolName}. Tap to review.`,
+    { type: "permission" }
+  );
 }
 
 export function createSession(
