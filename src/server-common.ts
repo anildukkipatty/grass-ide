@@ -278,6 +278,23 @@ export function notifyNewPermission(toolName: string): void {
   }
 }
 
+export function notifySessionDone(store: SessionStore): void {
+  const repoName = store.repoPath.split("/").filter(Boolean).pop() ?? store.repoPath;
+  const send = () => sendPushViaRelay(
+    "Task complete",
+    `Grass finished working on ${repoName}. Tap to see the response.`,
+    { type: "task_complete", sessionId: store.grassId }
+  );
+
+  if (store.emitter.listenerCount("event") === 0) {
+    send();
+  } else {
+    // SSE connection may be stale (iOS keeps it alive after backgrounding).
+    // Wait 2s — if the app was active it already received the done event via SSE.
+    setTimeout(send, 2000);
+  }
+}
+
 export function createSession(
   grassId: string,
   agent: "claude-code" | "opencode",
