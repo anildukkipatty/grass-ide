@@ -300,16 +300,6 @@ export function notifyNewPermission(toolName: string): void {
   }
 }
 
-export function drainPendingPermissions(store: SessionStore): void {
-  for (const [id, perm] of store.pendingPermissions) {
-    if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
-      store.pendingPermissions.delete(id);
-      perm.resolve({ behavior: "allow", updatedInput: perm.input });
-    }
-  }
-  notifyPermissionsChanged();
-}
-
 export function createSession(
   grassId: string,
   agent: "claude-code" | "opencode",

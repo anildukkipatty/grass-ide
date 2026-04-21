@@ -304,7 +304,6 @@ async function startEventStream(client: any, directory: string) {
         }
 
         if (permId) {
-<<<<<<< HEAD
           if (shouldAutoApprove(store.agent, toolName, store.permissionMode)) {
             respondPermission(store.sdkSessionId!, permId, true, store.repoPath).catch(() => {});
           } else {

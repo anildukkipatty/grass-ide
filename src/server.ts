@@ -6,7 +6,7 @@ import {
   maybeCaffeinate,
   handleWorkspaceRoutes,
   createSession,
-  drainPendingPermissions,
+  shouldAutoApprove,
   sessions,
   emitEvent,
   scheduleCleanup,
@@ -309,7 +309,24 @@ export async function handleRequest(
           jsonError(res, 400, "Invalid permissionMode"); return;
         }
         store.permissionMode = body.permissionMode as PermissionMode;
-        drainPendingPermissions(store);
+
+        if (store.agent === "claude-code") {
+          for (const [id, perm] of store.pendingPermissions) {
+            if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
+              store.pendingPermissions.delete(id);
+              perm.resolve({ behavior: "allow", updatedInput: perm.input });
+            }
+          }
+          notifyPermissionsChanged();
+        } else if (store.agent === "opencode" && store.sdkSessionId) {
+          for (const [id, perm] of store.pendingPermissions) {
+            if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
+              store.pendingPermissions.delete(id);
+              await opencodePermission(store.sdkSessionId, id, true, store.repoPath).catch(() => {});
+            }
+          }
+          notifyPermissionsChanged();
+        }
       }
 
       jsonOk(res, { sessionId: store.grassId, permissionMode: store.permissionMode });
