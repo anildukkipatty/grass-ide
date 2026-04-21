@@ -252,11 +252,14 @@ export function setPushNotificationSender(
 }
 
 export function sendPushViaRelay(title: string, body: string, data: Record<string, unknown>): void {
-  _pushSender?.(title, body, data);
+  if (!_pushSender) {
+    console.log("[push] SKIP: no push sender set (not in relay mode or WS not connected)");
+    return;
+  }
+  console.log(`[push] sending: title="${title}" body="${body}"`);
+  _pushSender(title, body, data);
 }
 
-// Replaces notifyPermissionsChanged() at permission-add sites.
-// Also sends a push when no SSE listeners are connected (app is in background).
 export function notifyNewPermission(toolName: string): void {
   notifyPermissionsChanged();
   sendPushViaRelay(

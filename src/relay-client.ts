@@ -154,7 +154,10 @@ export async function startRelayMode(
       ws.send(JSON.stringify(registerFrame));
       setPushNotificationSender((title, body, data) => {
         if (ws.readyState === WebSocket.OPEN) {
+          console.log("[push] sending push_notification frame to relay");
           ws.send(JSON.stringify({ type: "push_notification", title, body, data } satisfies GrassToRelayFrame));
+        } else {
+          console.log(`[push] SKIP: WS not open (readyState=${ws.readyState})`);
         }
       });
     });
