@@ -5,6 +5,7 @@ import {
   sessions,
   notifyPermissionsChanged,
   notifyNewPermission,
+  notifySessionDone,
   shouldAutoApprove,
   type SessionStore,
 } from "./server-common";
@@ -330,6 +331,7 @@ async function startEventStream(client: any, directory: string) {
       if (type === "session.idle" || (type === "session.status" && props?.status?.type === "idle")) {
         store.status = "done";
         emitEvent(store, "done", {});
+        notifySessionDone(store);
         scheduleCleanup(store);
       }
     }

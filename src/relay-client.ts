@@ -208,7 +208,7 @@ export async function startRelayMode(
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", (code) => {
       setPushNotificationSender(null);
       // Notify all active SSE listeners so they detach from the session emitter
       for (const [id, req] of activeRequests) {
@@ -217,6 +217,11 @@ export async function startRelayMode(
       }
 
       if (stopping) return;
+
+      // Code 4000 means the relay evicted this connection because a newer one
+      // registered with the same token — the new connection is already live, so
+      // do NOT reconnect (that would evict the new connection and loop forever).
+      if (code === 4000) return;
 
       setTimeout(() => {
         connect();
