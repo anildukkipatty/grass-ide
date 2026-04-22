@@ -3,7 +3,6 @@ import {
   emitEvent,
   scheduleCleanup,
   sessions,
-  notifyPermissionsChanged,
   notifyNewPermission,
   notifySessionDone,
   shouldAutoApprove,
@@ -86,7 +85,6 @@ export async function runAgent(store: SessionStore): Promise<void> {
         query: { directory: store.repoPath },
       });
       const sdkId = (sessionResult.data as any).id as string;
-      const sessionDir = (sessionResult.data as any).directory;
       store.sdkSessionId = sdkId;
       emitEvent(store, "system", { subtype: "init", session_id: sdkId });
     }
@@ -226,24 +224,15 @@ function findStoreByOpencodeSdkId(sdkId: string): SessionStore | undefined {
 async function startEventStream(client: any, directory: string) {
   try {
     const events = await client.event.subscribe();
-    console.log(`[opencode-events] stream started for dir="${directory}"`);
     for await (const event of events.stream) {
       const type = event.type as string;
       const props = event.properties as any;
 
-      console.log(`[opencode-events] type=${type} props=${JSON.stringify(props).slice(0, 200)}`);
-
       const sdkSessionId = extractSessionId(type, props);
-      if (!sdkSessionId) {
-        console.log(`[opencode-events] no sessionId for type=${type}, skipping`);
-        continue;
-      }
+      if (!sdkSessionId) continue;
 
       const store = findStoreByOpencodeSdkId(sdkSessionId);
-      if (!store) {
-        console.log(`[opencode-events] no store found for sdkSessionId=${sdkSessionId} (map size=${sdkIdToGrassId.size})`);
-        continue;
-      }
+      if (!store) continue;
 
       // Track message roles so we can filter out user message parts
       if (type === "message.updated") {
@@ -338,7 +327,7 @@ async function startEventStream(client: any, directory: string) {
       }
 
       if (type === "session.idle" || (type === "session.status" && props?.status?.type === "idle")) {
-        console.log(`[opencode-events] session done — grassId=${store.grassId} sdkId=${sdkSessionId}`);
+        if (store.status === "done") continue;
         store.status = "done";
         emitEvent(store, "done", {});
         notifySessionDone(store);

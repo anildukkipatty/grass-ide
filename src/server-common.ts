@@ -302,18 +302,13 @@ export function notifyNewPermission(toolName: string): void {
 
 export function notifySessionDone(store: SessionStore): void {
   const repoName = store.repoPath.split("/").filter(Boolean).pop() ?? store.repoPath;
-  const listenerCount = store.emitter.listenerCount("event");
-  console.log(`[push] notifySessionDone grassId=${store.grassId} listeners=${listenerCount}`);
-  const send = () => {
-    console.log(`[push] sending task_complete for grassId=${store.grassId}`);
-    sendPushViaRelay(
-      "Task complete",
-      `Grass finished working on ${repoName}. Tap to see the response.`,
-      { type: "task_complete", sessionId: store.grassId }
-    );
-  };
+  const send = () => sendPushViaRelay(
+    "Task complete",
+    `Grass finished working on ${repoName}. Tap to see the response.`,
+    { type: "task_complete", sessionId: store.grassId }
+  );
 
-  if (listenerCount === 0) {
+  if (store.emitter.listenerCount("event") === 0) {
     send();
   } else {
     setTimeout(send, 2000);
