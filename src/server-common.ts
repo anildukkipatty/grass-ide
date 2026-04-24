@@ -432,6 +432,9 @@ export function setupShutdown(cleanup: () => void, caffeinatePid: number | null)
     killCaffeinate(caffeinatePid);
     process.exit(1);
   });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[grass] unhandledRejection — process kept alive:", reason);
+  });
 }
 
 // --- SSE helper ---
@@ -597,6 +600,32 @@ export async function handleWorkspaceRoutes(
     } catch {
       diff = "";
     }
+
+    // Append untracked (never-committed) files as synthetic diffs
+    try {
+      const { readFileSync, statSync } = await import("fs");
+      const { join } = await import("path");
+      const untrackedRaw = execSync("git ls-files --others --exclude-standard", {
+        cwd: repoPath,
+        encoding: "utf-8",
+      }).trim();
+      for (const file of untrackedRaw.split("\n").filter(Boolean)) {
+        try {
+          const fullPath = join(repoPath, file);
+          if (statSync(fullPath).size > 1024 * 1024) continue; // skip files > 1 MB
+          const content = readFileSync(fullPath, "utf-8");
+          const lines = content.split("\n");
+          if (lines[lines.length - 1] === "") lines.pop();
+          const hunkLines = lines.map((l) => `+${l}`).join("\n");
+          diff += `\ndiff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${hunkLines}\n`;
+        } catch {
+          // binary or unreadable — skip
+        }
+      }
+    } catch {
+      // git ls-files unavailable — skip untracked
+    }
+
     jsonOk(res, { diff });
     return true;
   }

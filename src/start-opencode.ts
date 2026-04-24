@@ -68,7 +68,9 @@ async function getClientForDir(directory: string): Promise<any> {
     console.warn("  permissions: could not set permission config:", err?.message);
   }
 
-  startEventStream(client, directory);
+  startEventStream(client, directory).catch((err) => {
+    console.error("[grass] startEventStream crashed:", err);
+  });
   return client;
 }
 
