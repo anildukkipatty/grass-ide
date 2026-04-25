@@ -19,6 +19,7 @@ import {
   readBody,
   permissionsEmitter,
   buildPermissionsDump,
+  buildSessionsDump,
   notifyPermissionsChanged,
   IRequest,
   IResponse,
@@ -141,6 +142,8 @@ export async function handleRequest(
       } else if (store.agent === "opencode" && store.sdkSessionId) {
         await opencodeAbort(store.sdkSessionId, store.repoPath).catch(() => {});
         store.status = "done";
+        store.pendingPermissions.clear();
+        notifyPermissionsChanged();
         emitEvent(store, "aborted", { message: "Aborted by user" });
         scheduleCleanup(store);
       }
@@ -207,6 +210,7 @@ export async function handleRequest(
           return;
         }
         store.status = "running";
+        notifyPermissionsChanged();
         store.events = [];
         store.seq = 0;
         if (model) store.model = model;
@@ -220,6 +224,7 @@ export async function handleRequest(
           store.sdkSessionId = existingId;
         }
         emitEvent(store, 'user_prompt', { prompt });
+        notifyPermissionsChanged();
       }
 
       const s = store;
@@ -281,12 +286,12 @@ export async function handleRequest(
     if (method === "GET" && path === "/permissions/events") {
       res.writeHead(200, sseHeaders());
 
-      const sendDump = (permissions: ReturnType<typeof buildPermissionsDump>) => {
+      const sendDump = (permissions: ReturnType<typeof buildPermissionsDump>, sessions: ReturnType<typeof buildSessionsDump>) => {
         if (res.writableEnded) return;
-        res.write(`event: permissions\ndata: ${JSON.stringify({ permissions })}\n\n`);
+        res.write(`event: permissions\ndata: ${JSON.stringify({ permissions, sessions })}\n\n`);
       };
 
-      sendDump(buildPermissionsDump());
+      sendDump(buildPermissionsDump(), buildSessionsDump());
 
       permissionsEmitter.on("update", sendDump);
       req.on("close", () => {

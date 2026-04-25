@@ -4,6 +4,7 @@ import {
   scheduleCleanup,
   sessions,
   notifyNewPermission,
+  notifyPermissionsChanged,
   notifySessionDone,
   shouldAutoApprove,
   type SessionStore,
@@ -120,6 +121,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
       console.error("[query] promptAsync error:", errMsg);
       emitEvent(store, "agent_error", { message: errMsg });
       store.status = "error";
+      notifyPermissionsChanged();
       scheduleCleanup(store);
       return;
     }
@@ -128,6 +130,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
     console.error("[query] error:", err.message);
     emitEvent(store, "agent_error", { message: err?.message ?? "Unknown error" });
     store.status = "error";
+    notifyPermissionsChanged();
     scheduleCleanup(store);
   }
 }
@@ -325,12 +328,16 @@ async function startEventStream(client: any, directory: string) {
         const message = err?.data?.message || err?.message || err?.name || "Session error";
         emitEvent(store, "agent_error", { message });
         store.status = "error";
+        store.pendingPermissions.clear();
+        notifyPermissionsChanged();
         scheduleCleanup(store);
       }
 
       if (type === "session.idle" || (type === "session.status" && props?.status?.type === "idle")) {
         if (store.status === "done") continue;
         store.status = "done";
+        store.pendingPermissions.clear();
+        notifyPermissionsChanged();
         emitEvent(store, "done", {});
         notifySessionDone(store);
         scheduleCleanup(store);

@@ -259,8 +259,24 @@ export function buildPermissionsDump(): PermissionDumpItem[] {
   return items;
 }
 
+export type SessionStatus = "running" | "awaiting_permissions" | "done" | "error";
+
+export interface SessionSummaryItem {
+  grassId: string;
+  sessionId: string | null;
+  status: SessionStatus;
+}
+
+export function buildSessionsDump(): SessionSummaryItem[] {
+  return [...sessions.values()].map(store => ({
+    grassId: store.grassId,
+    sessionId: store.sdkSessionId,
+    status: store.pendingPermissions.size > 0 ? "awaiting_permissions" : store.status,
+  }));
+}
+
 export function notifyPermissionsChanged(): void {
-  permissionsEmitter.emit("update", buildPermissionsDump());
+  permissionsEmitter.emit("update", buildPermissionsDump(), buildSessionsDump());
 }
 
 // --- Push notification bridge (avoids circular import with relay-client) ---

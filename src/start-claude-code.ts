@@ -103,9 +103,11 @@ export async function runAgent(store: SessionStore): Promise<void> {
   } finally {
     store.abortController = null;
     store.pendingPermissions.clear();
+    notifyPermissionsChanged();
   }
 
   store.status = "done";
+  notifyPermissionsChanged();
   emitEvent(store, "done", {});
   notifySessionDone(store);
   scheduleCleanup(store);
@@ -117,6 +119,7 @@ export async function continueAgent(store: SessionStore, prompt: string): Promis
   // Then run agent — sdkSessionId already set so SDK will resume
   store.events.push({ seq: 0, type: "user_prompt", prompt });
   store.status = "running";
+  notifyPermissionsChanged();
   await runAgent(store);
 }
 
