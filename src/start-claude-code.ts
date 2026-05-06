@@ -5,6 +5,7 @@ import { readdir, stat } from "fs/promises";
 import { createInterface } from "readline";
 import { join } from "path";
 import { homedir } from "os";
+import { randomUUID } from "crypto";
 import {
   emitEvent,
   scheduleCleanup,
@@ -31,8 +32,34 @@ export async function runAgent(store: SessionStore): Promise<void> {
 
   try {
     let modelLogged = false;
+
+    const lastUserEvent = [...store.events].reverse().find(e => e.type === "user_prompt");
+    const promptText = (lastUserEvent?.prompt as string) ?? "";
+    const attachments = lastUserEvent?.attachments as Array<{ url: string }> | undefined;
+
+    let promptParam: string | AsyncIterable<any>;
+    if (attachments && attachments.length > 0) {
+      const content: Array<Record<string, unknown>> = [];
+      if (promptText) content.push({ type: "text", text: promptText });
+      for (const att of attachments) {
+        content.push({ type: "image", source: { type: "url", url: att.url } });
+      }
+      const sessionId = store.sdkSessionId ?? randomUUID();
+      async function* multimodalPrompt() {
+        yield {
+          type: "user" as const,
+          message: { role: "user" as const, content },
+          parent_tool_use_id: null,
+          session_id: sessionId,
+        };
+      }
+      promptParam = multimodalPrompt();
+    } else {
+      promptParam = promptText;
+    }
+
     const q = query({
-      prompt: [...store.events].reverse().find(e => e.type === "user_prompt")?.prompt as string ?? "",
+      prompt: promptParam,
       options: {
         model: store.model ?? "claude-sonnet-4-6",
         permissionMode: store.mode === "plan" ? "plan" : "default",
@@ -253,6 +280,7 @@ export async function loadTranscript(
         } else if (Array.isArray(rawContent)) {
           for (const b of rawContent) {
             if (b.type === "text" && b.text) blocks.push({ type: "text", text: b.text });
+            else if (b.type === "image" && b.source?.url) blocks.push({ type: "image_url", url: b.source.url });
           }
         }
         if (blocks.length) messages.push({ role: "user", content: blocks });
