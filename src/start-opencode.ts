@@ -76,7 +76,9 @@ async function getClientForDir(directory: string): Promise<any> {
 }
 
 export async function runAgent(store: SessionStore): Promise<void> {
-  const prompt = store.events.find(e => e.type === "user_prompt")?.prompt as string ?? "";
+  const lastUserEvent = [...store.events].reverse().find(e => e.type === "user_prompt");
+  const prompt = (lastUserEvent?.prompt as string) ?? "";
+  const attachments = lastUserEvent?.attachments as Array<{ url: string }> | undefined;
   (store as any)._msgRoles = new Map<string, string>();
   const client = await getClientForDir(store.repoPath);
 
@@ -84,7 +86,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
     if (!store.sdkSessionId) {
       const repoName = basename(store.repoPath);
       const sessionResult = await client.session.create({
-        body: { title: `[${repoName}] ${prompt.slice(0, 60)}` },
+        body: { title: `[${repoName}] ${prompt.slice(0, 60) || (attachments?.length ? "Image message" : "New chat")}` },
         query: { directory: store.repoPath },
       });
       const sdkId = (sessionResult.data as any).id as string;
@@ -111,7 +113,10 @@ export async function runAgent(store: SessionStore): Promise<void> {
     const promptResult = await client.session.promptAsync({
       path: { id: store.sdkSessionId! },
       body: {
-        parts: [{ type: "text", text: prompt }],
+        parts: [
+          ...(prompt ? [{ type: "text" as const, text: prompt }] : []),
+          ...(attachments?.map(att => ({ type: "file" as const, mime: "image/jpeg", url: att.url })) ?? []),
+        ],
         ...(modelParam ? { model: modelParam } : {}),
         ...(store.mode ? { agent: store.mode } : {}),
       },
@@ -148,6 +153,7 @@ export async function getSessionHistory(sdkSessionId: string, directory: string 
         const blocks: any[] = [];
         for (const p of parts) {
           if (p.type === "text" && p.text) blocks.push({ type: "text", text: p.text });
+          else if (p.type === "file" && p.url) blocks.push({ type: "image_url", url: p.url });
           else if (p.type === "tool") {
             const toolName = p.tool ?? "";
             const input = p.state?.input;
