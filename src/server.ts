@@ -177,7 +177,9 @@ export async function handleRequest(
         if (pending) {
           store.pendingPermissions.delete(toolUseID);
           notifyPermissionsChanged();
-          await opencodePermission(store.sdkSessionId, toolUseID, approved, store.repoPath).catch((err: any) => {
+          // For subagent permissions, respond on the child sdkSessionId that actually raised the request.
+          const respondSdkId = pending.askedBySdkSessionId ?? store.sdkSessionId;
+          await opencodePermission(respondSdkId, toolUseID, approved, store.repoPath).catch((err: any) => {
             console.error("Permission response failed:", err.message);
           });
         }
