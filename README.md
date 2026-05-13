@@ -52,44 +52,6 @@ npm run build
 npm install -g .
 ```
 
-## Set up Grass dispatch (use it from inside any AI agent)
-
-If you already use an AI agent — Claude Code, OpenCode, etc. — you can dispatch tasks to your Grass VM without leaving it. The agent installs a small markdown skill, logs you in with an OTP, and from then on you can just say _"dispatch this task to my Grass VM"_.
-
-**Copy the prompt below and paste it into your agent (Claude Code, OpenCode, …):**
-
-```text
-Install the grass-dispatch skill and set me up. Follow these steps exactly:
-
-1. Make sure the @grass-ai/ide npm package is installed globally.
-   Try: `npm install -g @grass-ai/ide`
-   If npm is blocked, fall back to:
-   `git clone https://github.com/anildukkipatty/grass-ide && cd grass-ide && npm install && npm run build && npm install -g .`
-
-2. Find the bundled skill at `<npm root -g>/@grass-ai/ide/skills/grass-dispatch/`.
-   - The canonical instructions live in `SKILL.md`.
-   - The per-agent install instructions live in `adapters/`.
-
-3. Detect which agent you are:
-   - Claude Code: env `CLAUDE_CODE_VERSION` set, or `claude --version` works → follow `adapters/claude-code.md`.
-   - OpenCode: env `OPENCODE_VERSION` set, or `opencode --version` works → follow `adapters/opencode.md`.
-   - Otherwise: ask me which agent you're running in.
-
-4. Install the skill per the adapter (copy SKILL.md to the correct path; for OpenCode, append it to AGENTS.md inside a `BEGIN grass-dispatch` / `END grass-dispatch` block).
-
-5. Now load and follow `SKILL.md` immediately:
-   - If `$HOME/.grass/config` (or `%USERPROFILE%\.grass\config` on Windows) already has a valid JWT, tell me "Already set up" and stop.
-   - Otherwise walk me through the OTP login (auto-suggest my email from `git config user.email`, send the code, ask me for it, store the JWT).
-
-Never print, log, or echo the JWT or OTP. Treat them as secrets.
-Use `https://api.codeongrass.com/v1` as the API base URL (or `GRASS_API_URL` if set).
-```
-
-After the agent finishes, you can say things like _"dispatch a task to fix the login bug on owner/repo"_ and it will call the Grass dispatch API for you. You'll get a push notification on your phone when the task finishes.
-
-> Cross-platform: works on macOS, Linux, and Windows. Skill content and config file live under the OS-correct user home directory.
-
----
 
 ## Quick Start
 
