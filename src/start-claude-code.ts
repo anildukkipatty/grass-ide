@@ -277,6 +277,10 @@ export async function loadTranscript(
         }
         if (blocks.length) messages.push({ role: "assistant", content: blocks });
       }
+
+      if (entry.type === "result" && entry.subtype === "success" && typeof entry.result === "string" && entry.result.trim()) {
+        messages.push({ role: "assistant", content: [{ type: "text", text: entry.result }] });
+      }
     }
 
     return messages;
