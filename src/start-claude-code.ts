@@ -65,6 +65,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
       },
     });
 
+    let receivedResult = false;
     try {
       for await (const msg of q) {
         if (msg.type === "system" && msg.subtype === "init") {
@@ -73,6 +74,8 @@ export async function runAgent(store: SessionStore): Promise<void> {
             store.sdkSessionId = newSdkId;
           }
         }
+
+        if (msg.type === "result") receivedResult = true;
 
         if (!modelLogged && msg.type === "assistant" && (msg as any).message?.model) {
           modelLogged = true;
@@ -93,6 +96,14 @@ export async function runAgent(store: SessionStore): Promise<void> {
       } else {
         throw err;
       }
+    }
+
+    if (!receivedResult) {
+      console.log("[query] stream ended without result message — treating as error");
+      emitEvent(store, "error", { message: "Claude process exited unexpectedly" });
+      store.status = "error";
+      scheduleCleanup(store);
+      return;
     }
   } catch (err: any) {
     console.log("[query] outer error:", err?.message, err?.stack);

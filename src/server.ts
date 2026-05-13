@@ -126,7 +126,7 @@ export async function handleRequest(
       const store = sessions.get(statusId)
         ?? [...sessions.values()].find(s => s.sdkSessionId === statusId);
       if (!store) { jsonError(res, 404, "Session not found"); return; }
-      jsonOk(res, { streaming: store.status === "running" });
+      jsonOk(res, { streaming: store.status === "running", sdkSessionId: store.sdkSessionId ?? null });
       return;
     }
 
