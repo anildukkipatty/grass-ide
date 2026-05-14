@@ -191,10 +191,16 @@ export async function handleRequest(
     // POST /chat
     if (method === "POST" && path === "/chat") {
       const body = await readBody(req);
-      const { repoPath, agent, prompt, sessionId: existingId, model, mode, permissionMode } = body;
+      const { repoPath, agent, prompt, sessionId: existingId, model, mode, permissionMode, attachments } = body;
+      // attachments: Array<{ url: string }> | undefined
 
       if (!repoPath) { jsonError(res, 400, "repoPath is required"); return; }
-      if (!prompt) { jsonError(res, 400, "prompt is required"); return; }
+      if (!prompt && (!attachments || attachments.length === 0)) {
+        jsonError(res, 400, "prompt or attachments is required"); return;
+      }
+      if (attachments != null && (!Array.isArray(attachments) || attachments.some((a: any) => typeof a?.url !== "string" || !a.url))) {
+        jsonError(res, 400, "attachments must be an array of { url: string }"); return;
+      }
       if (agent !== "claude-code" && agent !== "opencode") {
         jsonError(res, 400, "agent must be claude-code or opencode");
         return;
@@ -218,14 +224,14 @@ export async function handleRequest(
         if (model) store.model = model;
         if (mode) store.mode = mode;
         if (permissionMode) store.permissionMode = permissionMode as PermissionMode;
-        emitEvent(store, 'user_prompt', { prompt });
+        emitEvent(store, 'user_prompt', { prompt: prompt ?? '', ...(attachments?.length ? { attachments } : {}) });
       } else {
         const grassId = existingId ?? randomUUID();
         store = createSession(grassId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined);
         if (existingId) {
           store.sdkSessionId = existingId;
         }
-        emitEvent(store, 'user_prompt', { prompt });
+        emitEvent(store, 'user_prompt', { prompt: prompt ?? '', ...(attachments?.length ? { attachments } : {}) });
         notifyPermissionsChanged();
       }
 
