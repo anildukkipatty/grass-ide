@@ -329,7 +329,8 @@ export async function handleRequest(
           for (const [id, perm] of store.pendingPermissions) {
             if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
               store.pendingPermissions.delete(id);
-              await opencodePermission(store.sdkSessionId, id, true, store.repoPath).catch(() => {});
+              const respondSdkId = perm.askedBySdkSessionId ?? store.sdkSessionId;
+              await opencodePermission(respondSdkId, id, true, store.repoPath).catch(() => {});
             }
           }
           notifyPermissionsChanged();
