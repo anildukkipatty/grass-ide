@@ -126,7 +126,7 @@ export async function handleRequest(
       const store = sessions.get(statusId)
         ?? [...sessions.values()].find(s => s.sdkSessionId === statusId);
       if (!store) { jsonError(res, 404, "Session not found"); return; }
-      jsonOk(res, { streaming: store.status === "running" });
+      jsonOk(res, { streaming: store.status === "running", sdkSessionId: store.sdkSessionId ?? null });
       return;
     }
 
@@ -177,7 +177,9 @@ export async function handleRequest(
         if (pending) {
           store.pendingPermissions.delete(toolUseID);
           notifyPermissionsChanged();
-          await opencodePermission(store.sdkSessionId, toolUseID, approved, store.repoPath).catch((err: any) => {
+          // For subagent permissions, respond on the child sdkSessionId that actually raised the request.
+          const respondSdkId = pending.askedBySdkSessionId ?? store.sdkSessionId;
+          await opencodePermission(respondSdkId, toolUseID, approved, store.repoPath).catch((err: any) => {
             console.error("Permission response failed:", err.message);
           });
         }
@@ -327,7 +329,8 @@ export async function handleRequest(
           for (const [id, perm] of store.pendingPermissions) {
             if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
               store.pendingPermissions.delete(id);
-              await opencodePermission(store.sdkSessionId, id, true, store.repoPath).catch(() => {});
+              const respondSdkId = perm.askedBySdkSessionId ?? store.sdkSessionId;
+              await opencodePermission(respondSdkId, id, true, store.repoPath).catch(() => {});
             }
           }
           notifyPermissionsChanged();

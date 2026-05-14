@@ -1,13 +1,14 @@
 {
   "name": "@grass-ai/ide",
-  "version": "1.7.6",
+  "version": "1.8.1",
   "description": "CLI that bridges clients to Claude agents via the Claude Agent SDK",
   "main": "dist/index.js",
   "bin": {
     "grass": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "skills"
   ],
   "scripts": {
     "build": "tsc",

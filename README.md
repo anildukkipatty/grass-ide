@@ -12,7 +12,7 @@ Run one command. Scan a QR code. Start prompting Claude from any device — whil
 
 ---
 
-[Installation](#installation) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [API Reference](#api-reference) · [Contributing](#contributing)
+[Installation](#installation) · [Dispatch Skill](#set-up-grass-dispatch-use-it-from-inside-any-ai-agent) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [API Reference](#api-reference) · [Contributing](#contributing)
 
 </div>
 
@@ -51,6 +51,7 @@ npm install
 npm run build
 npm install -g .
 ```
+
 
 ## Quick Start
 
