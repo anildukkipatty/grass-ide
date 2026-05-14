@@ -196,6 +196,9 @@ export async function handleRequest(
       if (!prompt && (!attachments || attachments.length === 0)) {
         jsonError(res, 400, "prompt or attachments is required"); return;
       }
+      if (attachments != null && (!Array.isArray(attachments) || attachments.some((a: any) => typeof a?.url !== "string" || !a.url))) {
+        jsonError(res, 400, "attachments must be an array of { url: string }"); return;
+      }
       if (agent !== "claude-code" && agent !== "opencode") {
         jsonError(res, 400, "agent must be claude-code or opencode");
         return;
