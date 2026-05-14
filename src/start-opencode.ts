@@ -21,6 +21,11 @@ const clientsByDir = new Map<string, any>();
 // Reverse-lookup: opencode session ID → grass session ID
 const sdkIdToGrassId = new Map<string, string>();
 
+// Cache of subagent (child) sdkSessionId → root grass session ID, populated by walking parentID.
+const childSdkIdToRootGrassId = new Map<string, string>();
+// Dedupe concurrent in-flight parent walks for the same sdkSessionId.
+const resolveInflight = new Map<string, Promise<SessionStore | undefined>>();
+
 let sdkLoaded: any = null;
 
 const permissionConfig = {
@@ -80,6 +85,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
   const prompt = (lastUserEvent?.prompt as string) ?? "";
   const attachments = lastUserEvent?.attachments as Array<{ url: string }> | undefined;
   (store as any)._msgRoles = new Map<string, string>();
+  store.lastTaskToolUseId = undefined;
   const client = await getClientForDir(store.repoPath);
 
   try {
@@ -183,15 +189,18 @@ export async function listSessions(
   try {
     const listOptions = repoPath ? { query: { directory: repoPath } } : undefined;
     const result = await client.session.list(listOptions);
-    const sessionList = (result.data ?? []).map((s: any) => ({
-      id: s.id,
-      preview: s.title || s.id,
-      updatedAt: (() => {
-        const ts = s.time?.updated || s.time?.created || 0;
-        const ms = ts > 1e12 ? ts : ts * 1000;
-        return new Date(ms).toISOString();
-      })(),
-    }));
+    // Subagent sessions (parentID set) belong nested under their parent thread, not at chat-history top level.
+    const sessionList = (result.data ?? [])
+      .filter((s: any) => !s.parentID)
+      .map((s: any) => ({
+        id: s.id,
+        preview: s.title || s.id,
+        updatedAt: (() => {
+          const ts = s.time?.updated || s.time?.created || 0;
+          const ms = ts > 1e12 ? ts : ts * 1000;
+          return new Date(ms).toISOString();
+        })(),
+      }));
     sessionList.sort((a: any, b: any) => b.updatedAt.localeCompare(a.updatedAt));
     return sessionList;
   } catch (err: any) {
@@ -227,9 +236,39 @@ function extractSessionId(_type: string, props: any): string | undefined {
 }
 
 function findStoreByOpencodeSdkId(sdkId: string): SessionStore | undefined {
-  const grassId = sdkIdToGrassId.get(sdkId);
+  const grassId = sdkIdToGrassId.get(sdkId) ?? childSdkIdToRootGrassId.get(sdkId);
   if (!grassId) return undefined;
   return sessions.get(grassId);
+}
+
+// Walk session.parentID via the SDK until we land on a session we own (root) or run out.
+// Returns the root grass store and caches the mapping. Used to route subagent events
+// to the parent thread.
+async function resolveParentStore(client: any, sdkSessionId: string): Promise<SessionStore | undefined> {
+  const direct = findStoreByOpencodeSdkId(sdkSessionId);
+  if (direct) return direct;
+
+  const inflight = resolveInflight.get(sdkSessionId);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    let cur = sdkSessionId;
+    for (let hops = 0; hops < 5; hops++) {
+      const got = await client.session.get({ path: { id: cur } }).catch(() => null);
+      const data = got?.data;
+      if (!data?.parentID) return undefined;
+      cur = data.parentID;
+      const rootGrassId = sdkIdToGrassId.get(cur);
+      if (rootGrassId) {
+        childSdkIdToRootGrassId.set(sdkSessionId, rootGrassId);
+        return sessions.get(rootGrassId);
+      }
+    }
+    return undefined;
+  })();
+  resolveInflight.set(sdkSessionId, promise);
+  promise.finally(() => resolveInflight.delete(sdkSessionId));
+  return promise;
 }
 
 async function startEventStream(client: any, directory: string) {
@@ -242,8 +281,18 @@ async function startEventStream(client: any, directory: string) {
       const sdkSessionId = extractSessionId(type, props);
       if (!sdkSessionId) continue;
 
-      const store = findStoreByOpencodeSdkId(sdkSessionId);
-      if (!store) continue;
+      let store = findStoreByOpencodeSdkId(sdkSessionId);
+      if (!store) {
+        // First event from a not-yet-mapped session: kick off the parent walk
+        // in the background and drop this event. Awaiting here would stall the
+        // for-await loop and back up every other session's events behind one
+        // SDK round-trip. By the next event from this child, the cache is warm.
+        void resolveParentStore(client, sdkSessionId);
+        continue;
+      }
+      // Child events: store was reached via childSdkIdToRootGrassId (root's parent store),
+      // so its sdkSessionId differs from the event's sdkSessionId.
+      const isChildEvent = sdkSessionId !== store.sdkSessionId;
 
       // Track message roles so we can filter out user message parts
       if (type === "message.updated") {
@@ -257,11 +306,15 @@ async function startEventStream(client: any, directory: string) {
       if (type === "message.part.updated") {
         const part = props.part;
         const msgRole = (store as any)._msgRoles?.get(part.messageID);
+        const parentToolUseId = isChildEvent ? store.lastTaskToolUseId : undefined;
 
         if (part.type === "text") {
           const text = part.text ?? "";
           if (text && msgRole === "assistant") {
-            emitEvent(store, "assistant", { content: text });
+            emitEvent(store, "assistant", {
+              content: text,
+              ...(parentToolUseId ? { parent_tool_use_id: parentToolUseId } : {}),
+            });
           }
         }
         if (part.type === "tool") {
@@ -270,10 +323,20 @@ async function startEventStream(client: any, directory: string) {
             const title = state.title;
             const input = state.input ?? {};
             const label = title || formatToolInput(part.tool, input);
-            emitEvent(store, "tool_use", { tool_name: part.tool, tool_input: label });
+            // Remember the parent's most-recent Task callID so child-session events
+            // can attach to it via parent_tool_use_id.
+            if (!isChildEvent && part.tool === "task" && part.callID) {
+              store.lastTaskToolUseId = part.callID;
+            }
+            emitEvent(store, "tool_use", {
+              tool_name: part.tool,
+              tool_input: label,
+              ...(part.callID ? { tool_use_id: part.callID } : {}),
+              ...(parentToolUseId ? { parent_tool_use_id: parentToolUseId } : {}),
+            });
           }
         }
-        if (part.type === "step-start") {
+        if (part.type === "step-start" && !isChildEvent) {
           emitEvent(store, "status", { status: "thinking" });
         }
       }
@@ -315,19 +378,31 @@ async function startEventStream(client: any, directory: string) {
 
         if (permId) {
           if (shouldAutoApprove(store.agent, toolName, store.permissionMode)) {
-            respondPermission(store.sdkSessionId!, permId, true, store.repoPath).catch(() => {});
+            // Respond on the child's own sdkSessionId, not the parent's.
+            respondPermission(sdkSessionId, permId, true, store.repoPath).catch(() => {});
           } else {
+            const parentToolUseId = isChildEvent ? store.lastTaskToolUseId : undefined;
             store.pendingPermissions.set(permId, {
               resolve: () => {},
               input,
               toolName,
               toolUseID: permId,
+              askedBySdkSessionId: sdkSessionId,
             });
             notifyNewPermission(toolName);
-            emitEvent(store, "permission_request", { toolUseID: permId, toolName, input });
+            emitEvent(store, "permission_request", {
+              toolUseID: permId,
+              toolName,
+              input,
+              ...(parentToolUseId ? { parent_tool_use_id: parentToolUseId } : {}),
+            });
           }
         }
       }
+
+      // Child-session lifecycle events do NOT terminate the parent thread —
+      // the parent's own session.idle/error governs the thread's lifecycle.
+      if (isChildEvent) continue;
 
       if (type === "session.error") {
         const err = props?.error;

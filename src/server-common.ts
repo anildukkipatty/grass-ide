@@ -182,6 +182,9 @@ export interface PendingPermission {
   input: any;
   toolName: string;
   toolUseID: string;
+  // sdk session that originally raised the permission. Differs from store.sdkSessionId
+  // when an opencode subagent (child session) asked it.
+  askedBySdkSessionId?: string;
 }
 
 export type PermissionMode = "ask-permissions" | "allow-all-edits" | "yolo";
@@ -220,6 +223,8 @@ export interface SessionStore {
   abortController: AbortController | null;
   pendingPermissions: Map<string, PendingPermission>;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
+  // Most recent in-flight Task tool callID. Child-session events route here as parent_tool_use_id.
+  lastTaskToolUseId?: string;
 }
 
 export const sessions = new Map<string, SessionStore>();
