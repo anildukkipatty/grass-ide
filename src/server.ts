@@ -27,6 +27,7 @@ import {
 } from "./server-common";
 import { initAgent as initClaudeCode, runAgent as runClaudeCode, listSessions as listClaudeSessions, loadTranscript } from "./start-claude-code";
 import { initAgent as initOpencode, runAgent as runOpencode, listSessions as listOpencodeSessions, getSessionHistory, abortSession as opencodeAbort, respondPermission as opencodePermission } from "./start-opencode";
+import { initAgent as initCodex, runAgent as runCodex, listSessions as listCodexSessions, loadTranscript as loadCodexTranscript } from "./start-codex";
 import { startRelayMode } from "./relay-client";
 
 export async function handleRequest(
@@ -61,7 +62,7 @@ export async function handleRequest(
     // GET /sessions
     if (method === "GET" && path === "/sessions") {
       const repoPath = query.repoPath ?? workspaceCwd;
-      const agent = query.agent as "claude-code" | "opencode" | undefined;
+      const agent = query.agent as "claude-code" | "opencode" | "codex" | undefined;
 
       if (!agent || agent === "claude-code") {
         const list = await listClaudeSessions(repoPath);
@@ -70,6 +71,11 @@ export async function handleRequest(
       }
       if (agent === "opencode") {
         const list = await listOpencodeSessions(repoPath);
+        jsonOk(res, { sessions: list });
+        return;
+      }
+      if (agent === "codex") {
+        const list = await listCodexSessions(repoPath);
         jsonOk(res, { sessions: list });
         return;
       }
@@ -82,9 +88,13 @@ export async function handleRequest(
     if (method === "GET" && path.endsWith("/history") && historyId) {
       const store = sessions.get(historyId);
       if (!store) {
-        const agentParam = query.agent as "claude-code" | "opencode" | undefined;
+        const agentParam = query.agent as "claude-code" | "opencode" | "codex" | undefined;
         if (agentParam === "opencode") {
           const history = await getSessionHistory(historyId, query.repoPath ?? workspaceCwd);
+          jsonOk(res, { messages: history });
+        } else if (agentParam === "codex") {
+          const repoPath = query.repoPath ?? workspaceCwd;
+          const history = await loadCodexTranscript(historyId, repoPath);
           jsonOk(res, { messages: history });
         } else {
           const repoPath = query.repoPath ?? workspaceCwd;
@@ -95,6 +105,9 @@ export async function handleRequest(
       }
       if (store.agent === "opencode" && store.sdkSessionId) {
         const history = await getSessionHistory(store.sdkSessionId, store.repoPath);
+        jsonOk(res, { messages: history });
+      } else if (store.agent === "codex") {
+        const history = await loadCodexTranscript(store.sdkSessionId ?? historyId, store.repoPath);
         jsonOk(res, { messages: history });
       } else {
         const history = await loadTranscript(store.sdkSessionId ?? historyId, store.repoPath);
@@ -138,6 +151,8 @@ export async function handleRequest(
       if (!store) { jsonError(res, 404, "Session not found"); return; }
       if (store.status !== "running") { jsonOk(res, { ok: true }); return; }
       if (store.agent === "claude-code" && store.abortController) {
+        store.abortController.abort();
+      } else if (store.agent === "codex" && store.abortController) {
         store.abortController.abort();
       } else if (store.agent === "opencode" && store.sdkSessionId) {
         await opencodeAbort(store.sdkSessionId, store.repoPath).catch(() => {});
@@ -201,8 +216,8 @@ export async function handleRequest(
       if (attachments != null && (!Array.isArray(attachments) || attachments.some((a: any) => typeof a?.url !== "string" || !a.url))) {
         jsonError(res, 400, "attachments must be an array of { url: string }"); return;
       }
-      if (agent !== "claude-code" && agent !== "opencode") {
-        jsonError(res, 400, "agent must be claude-code or opencode");
+      if (agent !== "claude-code" && agent !== "opencode" && agent !== "codex") {
+        jsonError(res, 400, "agent must be claude-code, opencode, or codex");
         return;
       }
       if (!availableAgents.includes(agent)) {
@@ -238,6 +253,10 @@ export async function handleRequest(
       const s = store;
       if (agent === "claude-code") {
         runClaudeCode(s).catch((err) => {
+          console.error("[runAgent] unhandled:", err);
+        });
+      } else if (agent === "codex") {
+        runCodex(s).catch((err) => {
           console.error("[runAgent] unhandled:", err);
         });
       } else {
@@ -331,6 +350,8 @@ export async function handleRequest(
             }
           }
           notifyPermissionsChanged();
+        } else if (store.agent === "codex") {
+          // codex applies approvalPolicy at thread start — mode change takes effect next turn
         } else if (store.agent === "opencode" && store.sdkSessionId) {
           for (const [id, perm] of store.pendingPermissions) {
             if (shouldAutoApprove(store.agent, perm.toolName, store.permissionMode)) {
@@ -362,9 +383,11 @@ export async function start(network: string = "local", portOverride?: number, ca
 
   const claudeAvailable = await initClaudeCode();
   const opencodeAvailable = await initOpencode();
+  const codexAvailable = await initCodex();
   const availableAgents: string[] = [
     ...(claudeAvailable ? ["claude-code"] : []),
     ...(opencodeAvailable ? ["opencode"] : []),
+    ...(codexAvailable ? ["codex"] : []),
   ];
   console.log(`  available agents: ${availableAgents.join(", ") || "none"}`);
 
