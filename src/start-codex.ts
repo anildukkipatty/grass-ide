@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { createReadStream, existsSync, mkdirSync, renameSync, writeFileSync, readFileSync, rmSync, readdirSync } from "fs";
+import { createReadStream, existsSync, mkdirSync, renameSync, writeFileSync, readFileSync, rmSync, readdirSync, realpathSync } from "fs";
 import { readdir, stat, readFile } from "fs/promises";
 import { createInterface } from "readline";
 import { join, extname } from "path";
@@ -81,6 +81,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
   if (!ctor) {
     emitEvent(store, "error", { message: "Codex SDK not available" });
     store.status = "error";
+    notifyPermissionsChanged();
     scheduleCleanup(store);
     return;
   }
@@ -108,6 +109,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
     console.error("[codex] attachment download failed:", err?.message);
     emitEvent(store, "error", { message: `Attachment download failed: ${err?.message ?? "unknown"}` });
     store.status = "error";
+    notifyPermissionsChanged();
     scheduleCleanup(store);
     return;
   }
@@ -118,6 +120,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
   if (userInput.length === 0) {
     emitEvent(store, "error", { message: "prompt or attachments is required" });
     store.status = "error";
+    notifyPermissionsChanged();
     scheduleCleanup(store);
     return;
   }
@@ -237,7 +240,7 @@ function handleEvent(ev: ThreadEvent, store: SessionStore): void {
       emitEvent(store, "result", { subtype: "success", usage: ev.usage });
       return;
     case "turn.failed":
-      emitEvent(store, "error", { message: ev.error.message });
+      emitEvent(store, "error", { message: ev.error?.message ?? "Codex turn failed" });
       store.status = "error";
       return;
     case "error":
@@ -521,11 +524,31 @@ function appendManifest(dir: string, attachments: PendingAttachment[]): void {
 
 const cwdCache = new Map<string, string | null>();
 
+function normalizePath(p: string): string {
+  let s = p.replace(/\/+$/, "") || "/";
+  try {
+    s = realpathSync(s);
+  } catch {
+    // path doesn't exist — keep the trimmed form
+  }
+  return s;
+}
+
 export async function listSessions(
   cwd: string,
 ): Promise<{ id: string; preview: string; updatedAt: string }[]> {
   const indexPath = join(homedir(), ".codex", "session_index.jsonl");
   const sessionsRoot = join(homedir(), ".codex", "sessions");
+
+  const normCache = new Map<string, string>();
+  const normalize = (p: string): string => {
+    const hit = normCache.get(p);
+    if (hit !== undefined) return hit;
+    const n = normalizePath(p);
+    normCache.set(p, n);
+    return n;
+  };
+  const normCwd = normalize(cwd);
 
   const entries: Array<{ id: string; preview: string; updatedAt: string }> = [];
   const seen = new Set<string>();
@@ -553,9 +576,10 @@ export async function listSessions(
         let recCwd = cwdCache.get(rec.id);
         if (recCwd === undefined) {
           recCwd = await readSessionCwd(rec.id);
-          cwdCache.set(rec.id, recCwd);
+          if (recCwd !== null) cwdCache.set(rec.id, recCwd);
         }
-        if (recCwd !== cwd) continue;
+        if (recCwd === null) continue;
+        if (normalize(recCwd) !== normCwd) continue;
         entries.push({
           id: rec.id,
           preview: rec.thread_name || rec.id,
@@ -579,7 +603,7 @@ export async function listSessions(
         const meta = await readSessionMeta(r.path);
         if (!meta) continue;
         cwdCache.set(meta.id, meta.cwd);
-        if (meta.cwd !== cwd) continue;
+        if (normalize(meta.cwd) !== normCwd) continue;
         entries.push({
           id: meta.id,
           preview: `${meta.id.slice(0, 8)}…`,
