@@ -107,7 +107,11 @@ export async function handleRequest(
         const history = await getSessionHistory(store.sdkSessionId, store.repoPath);
         jsonOk(res, { messages: history });
       } else if (store.agent === "codex") {
-        const history = await loadCodexTranscript(store.sdkSessionId ?? historyId, store.repoPath);
+        if (!store.sdkSessionId) {
+          jsonOk(res, { messages: [] });
+          return;
+        }
+        const history = await loadCodexTranscript(store.sdkSessionId, store.repoPath);
         jsonOk(res, { messages: history });
       } else {
         const history = await loadTranscript(store.sdkSessionId ?? historyId, store.repoPath);

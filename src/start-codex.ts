@@ -10,6 +10,7 @@ import type {
   Codex as CodexClass,
   Thread,
   ThreadEvent,
+  ThreadItem,
   ThreadOptions,
   UserInput,
   Input,
@@ -255,7 +256,7 @@ function handleEvent(ev: ThreadEvent, store: SessionStore): void {
   }
 }
 
-function handleItem(eventType: string, item: any, store: SessionStore): void {
+function handleItem(eventType: string, item: ThreadItem, store: SessionStore): void {
   switch (item.type) {
     case "agent_message": {
       if (eventType === "item.completed") {
@@ -275,6 +276,14 @@ function handleItem(eventType: string, item: any, store: SessionStore): void {
           tool_name: "Bash",
           tool_input: item.command,
           tool_use_id: item.id,
+        });
+      } else if (eventType === "item.completed") {
+        emitEvent(store, "tool_result", {
+          tool_use_id: item.id,
+          tool_name: "Bash",
+          output: item.aggregated_output ?? "",
+          exit_code: item.exit_code ?? null,
+          status: item.status ?? "completed",
         });
       }
       return;
@@ -304,7 +313,7 @@ function handleItem(eventType: string, item: any, store: SessionStore): void {
     }
     case "todo_list": {
       if (eventType === "item.completed") {
-        const items = (item.items ?? []) as Array<{ text: string; completed: boolean }>;
+        const items = item.items ?? [];
         const summary = items.map((t) => `[${t.completed ? "done" : "open"}] ${t.text}`).join(", ");
         emitEvent(store, "tool_use", {
           tool_name: "TodoWrite",
@@ -317,7 +326,7 @@ function handleItem(eventType: string, item: any, store: SessionStore): void {
     case "mcp_tool_call": {
       if (eventType === "item.completed") {
         emitEvent(store, "tool_use", {
-          tool_name: `${item.server}.${item.tool}`,
+          tool_name: `mcp__${item.server}__${item.tool}`,
           tool_input: JSON.stringify(item.arguments ?? {}),
           tool_use_id: item.id,
         });
