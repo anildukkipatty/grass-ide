@@ -532,6 +532,7 @@ function appendManifest(dir: string, attachments: PendingAttachment[]): void {
 }
 
 const cwdCache = new Map<string, string | null>();
+const previewCache = new Map<string, string>();
 
 function normalizePath(p: string): string {
   let s = p.replace(/\/+$/, "") || "/";
@@ -584,14 +585,24 @@ export async function listSessions(
         seen.add(rec.id);
         let recCwd = cwdCache.get(rec.id);
         if (recCwd === undefined) {
-          recCwd = await readSessionCwd(rec.id);
-          if (recCwd !== null) cwdCache.set(rec.id, recCwd);
+          const filePath = await findSessionFile(rec.id);
+          if (filePath) {
+            const meta = await readSessionMetaAndPreview(filePath);
+            recCwd = meta.cwd;
+            if (recCwd !== null) cwdCache.set(rec.id, recCwd);
+            if (meta.preview) previewCache.set(rec.id, meta.preview);
+          } else {
+            recCwd = null;
+          }
         }
         if (recCwd === null) continue;
         if (normalize(recCwd) !== normCwd) continue;
+        const threadName = typeof rec.thread_name === "string" ? rec.thread_name.trim() : "";
+        const cachedPreview = previewCache.get(rec.id);
+        const preview = threadName || cachedPreview || `${rec.id.slice(0, 8)}…`;
         entries.push({
           id: rec.id,
-          preview: rec.thread_name || rec.id,
+          preview,
           updatedAt: rec.updated_at || new Date(0).toISOString(),
         });
       }
@@ -609,13 +620,16 @@ export async function listSessions(
         const id = extractIdFromRolloutName(r.name);
         if (!id || seen.has(id)) continue;
         seen.add(id);
-        const meta = await readSessionMeta(r.path);
-        if (!meta) continue;
+        const meta = await readSessionMetaAndPreview(r.path);
+        if (meta.id === null || meta.cwd === null) continue;
         cwdCache.set(meta.id, meta.cwd);
+        if (meta.preview) previewCache.set(meta.id, meta.preview);
         if (normalize(meta.cwd) !== normCwd) continue;
+        const cachedPreview = previewCache.get(meta.id);
+        const preview = cachedPreview || `${meta.id.slice(0, 8)}…`;
         entries.push({
           id: meta.id,
-          preview: `${meta.id.slice(0, 8)}…`,
+          preview,
           updatedAt: new Date(r.mtimeMs).toISOString(),
         });
       }
@@ -663,13 +677,13 @@ async function collectRollouts(root: string, limit: number): Promise<Array<{ pat
   return out.slice(0, limit);
 }
 
-async function readSessionCwd(threadId: string): Promise<string | null> {
-  const filePath = await findSessionFile(threadId);
-  if (!filePath) return null;
-  return readCwdFromRollout(filePath);
-}
-
-async function readCwdFromRollout(filePath: string): Promise<string | null> {
+async function readSessionMetaAndPreview(
+  filePath: string,
+): Promise<{ id: string | null; cwd: string | null; preview: string }> {
+  let id: string | null = null;
+  let cwd: string | null = null;
+  const parts: string[] = [];
+  let totalLen = 0;
   try {
     const rl = createInterface({
       input: createReadStream(filePath, { encoding: "utf-8" }),
@@ -677,43 +691,48 @@ async function readCwdFromRollout(filePath: string): Promise<string | null> {
     });
     for await (const line of rl) {
       if (!line) continue;
+      let entry: any;
       try {
-        const entry = JSON.parse(line);
-        if (entry?.type === "session_meta" && typeof entry?.payload?.cwd === "string") {
-          rl.close();
-          return entry.payload.cwd as string;
-        }
+        entry = JSON.parse(line);
       } catch {
-        // skip malformed line
+        continue;
+      }
+      if (entry?.type === "session_meta") {
+        if (typeof entry?.payload?.cwd === "string") cwd = entry.payload.cwd;
+        if (typeof entry?.payload?.id === "string") id = entry.payload.id;
+        continue;
+      }
+      if (entry?.type === "response_item" && entry?.payload?.type === "message") {
+        const role = entry.payload.role;
+        if (role !== "user" && role !== "assistant") continue;
+        for (const block of entry.payload.content ?? []) {
+          if (
+            typeof block?.text === "string" &&
+            (block.type === "input_text" || block.type === "output_text" || block.type === "text")
+          ) {
+            const cleaned = stripEnvelopes(block.text).replace(/<[^>]*>/g, "").trim();
+            if (!cleaned) continue;
+            parts.push(cleaned);
+            totalLen += (parts.length > 1 ? 3 : 0) + cleaned.length;
+            if (totalLen >= 80) {
+              rl.close();
+              break;
+            }
+          }
+        }
+        if (totalLen >= 80) break;
       }
     }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function readSessionMeta(filePath: string): Promise<{ id: string; cwd: string } | null> {
-  try {
-    const rl = createInterface({
-      input: createReadStream(filePath, { encoding: "utf-8" }),
-      crlfDelay: Infinity,
-    });
-    for await (const line of rl) {
-      if (!line) continue;
-      try {
-        const entry = JSON.parse(line);
-        if (entry?.type === "session_meta" && typeof entry?.payload?.cwd === "string" && typeof entry?.payload?.id === "string") {
-          rl.close();
-          return { id: entry.payload.id as string, cwd: entry.payload.cwd as string };
-        }
-      } catch {
-        // skip malformed line
-      }
+    let preview = parts.join(" — ");
+    if (preview.length > 80) {
+      let cut = 80;
+      const code = preview.charCodeAt(cut - 1);
+      if (code >= 0xd800 && code <= 0xdbff) cut = 79;
+      preview = preview.slice(0, cut) + "...";
     }
-    return null;
-  } catch {
-    return null;
+    return { id, cwd, preview };
+  } catch (err: any) {
+    return { id: null, cwd: null, preview: "" };
   }
 }
 
@@ -755,6 +774,8 @@ const ENVELOPE_PATTERNS: RegExp[] = [
   /<skills_instructions>[\s\S]*?<\/skills_instructions>/g,
   /<user_instructions>[\s\S]*?<\/user_instructions>/g,
   /<permissions instructions>[\s\S]*?<\/permissions instructions>/g,
+  /<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>/g,
+  /^# AGENTS\.md instructions for [^\n]*\n*/g,
 ];
 
 // codex splits the image envelope across separate content blocks. Drop block-only markers.
