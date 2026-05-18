@@ -1,10 +1,11 @@
 import { execSync } from "child_process";
-import { createReadStream, existsSync, mkdirSync, renameSync, writeFileSync, readFileSync } from "fs";
+import { createReadStream, existsSync, mkdirSync, renameSync, writeFileSync, readFileSync, rmSync, readdirSync } from "fs";
 import { readdir, stat, readFile } from "fs/promises";
 import { createInterface } from "readline";
 import { join, extname } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
+import { isIP } from "net";
 import type {
   Codex as CodexClass,
   Thread,
@@ -147,6 +148,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
   const abortController = new AbortController();
   store.abortController = abortController;
   let receivedCompletion = false;
+  let turnSucceeded = false;
 
   try {
     console.log(`[codex] starting turn (resume=${!!store.sdkSessionId})`);
@@ -168,24 +170,30 @@ export async function runAgent(store: SessionStore): Promise<void> {
         throw err;
       }
     }
+    turnSucceeded = store.status !== "error";
   } catch (err: any) {
     console.log("[codex] outer error:", err?.message, err?.stack);
     emitEvent(store, "error", { message: err?.message ?? "Unknown error" });
     store.status = "error";
+    turnSucceeded = false;
   } finally {
     if (isStaging && store.sdkSessionId) {
       const finalDir = join(baseDir, store.sdkSessionId);
       try {
         if (existsSync(finalDir)) {
-          if (downloaded.length > 0) appendManifest(finalDir, downloaded);
+          if (existsSync(attachmentDir)) {
+            moveDirContents(attachmentDir, finalDir);
+            try { rmSync(attachmentDir, { recursive: true, force: true }); } catch {}
+          }
+          if (turnSucceeded && downloaded.length > 0) appendManifest(finalDir, downloaded);
         } else if (existsSync(attachmentDir)) {
           renameSync(attachmentDir, finalDir);
-          if (downloaded.length > 0) writeManifestArray(finalDir, downloaded);
+          if (turnSucceeded && downloaded.length > 0) writeManifestArray(finalDir, downloaded);
         }
       } catch (err: any) {
         console.error("[codex] failed to promote staging dir:", err?.message);
       }
-    } else if (!isStaging && downloaded.length > 0) {
+    } else if (!isStaging && turnSucceeded && downloaded.length > 0) {
       appendManifest(attachmentDir, downloaded);
     }
     store.abortController = null;
@@ -332,9 +340,67 @@ async function downloadAttachments(
   return out;
 }
 
+const ATTACHMENT_FETCH_TIMEOUT_MS = 30_000;
+const ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
+
+export function isPublicHttpUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!host) return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+
+  const ipKind = isIP(host);
+  if (ipKind === 4) {
+    const parts = host.split(".").map((p) => Number(p));
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+    const [a, b] = parts;
+    if (a === 10) return false;
+    if (a === 127) return false;
+    if (a === 0) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    return true;
+  }
+  if (ipKind === 6) {
+    const expanded = host;
+    if (expanded === "::1" || expanded === "::" || expanded === "0:0:0:0:0:0:0:1" || expanded === "0:0:0:0:0:0:0:0") return false;
+    const first = expanded.split(":")[0];
+    if (!first) return true;
+    const firstNum = parseInt(first, 16);
+    if (Number.isFinite(firstNum)) {
+      // fc00::/7 — unique-local (fc00–fdff)
+      if ((firstNum & 0xfe00) === 0xfc00) return false;
+      // fe80::/10 — link-local (fe80–febf)
+      if ((firstNum & 0xffc0) === 0xfe80) return false;
+    }
+    return true;
+  }
+  // Non-IP hostname — block bare-IP-looking-as-DNS edge cases handled above.
+  return true;
+}
+
 async function fetchToFile(url: string, dir: string): Promise<{ path: string; basename: string } | null> {
-  const res = await fetch(url);
+  if (!isPublicHttpUrl(url)) {
+    throw new Error(`refusing to fetch non-public or non-http(s) URL: ${url}`);
+  }
+  const res = await fetch(url, { signal: AbortSignal.timeout(ATTACHMENT_FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`fetch ${url} returned ${res.status}`);
+
+  const declared = res.headers.get("content-length");
+  if (declared) {
+    const n = Number(declared);
+    if (Number.isFinite(n) && n > ATTACHMENT_MAX_BYTES) {
+      throw new Error(`attachment too large (${n} bytes > ${ATTACHMENT_MAX_BYTES}): ${url}`);
+    }
+  }
+
   let ext = extname(new URL(url).pathname);
   if (!ext) {
     const ct = res.headers.get("content-type") || "";
@@ -344,11 +410,55 @@ async function fetchToFile(url: string, dir: string): Promise<{ path: string; ba
     else if (ct.includes("jpeg") || ct.includes("jpg")) ext = ".jpg";
     else ext = ".jpg";
   }
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  if (res.body) {
+    const reader = (res.body as any).getReader?.();
+    if (reader) {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = Buffer.from(value);
+        total += chunk.length;
+        if (total > ATTACHMENT_MAX_BYTES) {
+          try { await reader.cancel(); } catch {}
+          throw new Error(`attachment exceeded ${ATTACHMENT_MAX_BYTES} bytes: ${url}`);
+        }
+        chunks.push(chunk);
+      }
+    } else {
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > ATTACHMENT_MAX_BYTES) {
+        throw new Error(`attachment exceeded ${ATTACHMENT_MAX_BYTES} bytes: ${url}`);
+      }
+      chunks.push(buf);
+      total = buf.length;
+    }
+  }
+
   const fileName = `${randomUUID()}${ext}`;
   const filePath = join(dir, fileName);
-  const buf = Buffer.from(await res.arrayBuffer());
-  writeFileSync(filePath, buf);
+  writeFileSync(filePath, Buffer.concat(chunks, total));
   return { path: filePath, basename: fileName };
+}
+
+function moveDirContents(src: string, dest: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(src);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const from = join(src, name);
+    const to = join(dest, name);
+    try {
+      renameSync(from, to);
+    } catch {
+      // ignore individual move failures
+    }
+  }
 }
 
 interface ManifestEntry { filename: string; url: string }
@@ -383,51 +493,118 @@ export async function listSessions(
   cwd: string,
 ): Promise<{ id: string; preview: string; updatedAt: string }[]> {
   const indexPath = join(homedir(), ".codex", "session_index.jsonl");
-  if (!existsSync(indexPath)) return [];
+  const sessionsRoot = join(homedir(), ".codex", "sessions");
 
   const entries: Array<{ id: string; preview: string; updatedAt: string }> = [];
-  try {
-    const rl = createInterface({
-      input: createReadStream(indexPath, { encoding: "utf-8" }),
-      crlfDelay: Infinity,
-    });
+  const seen = new Set<string>();
 
-    const records: Array<{ id: string; thread_name?: string; updated_at?: string }> = [];
-    for await (const line of rl) {
-      if (!line) continue;
-      try {
-        const rec = JSON.parse(line);
-        if (rec?.id) records.push(rec);
-      } catch {
-        // ignore malformed lines
-      }
-    }
-
-    for (const rec of records) {
-      let recCwd = cwdCache.get(rec.id);
-      if (recCwd === undefined) {
-        recCwd = await readSessionCwd(rec.id);
-        cwdCache.set(rec.id, recCwd);
-      }
-      if (recCwd !== cwd) continue;
-      entries.push({
-        id: rec.id,
-        preview: rec.thread_name || rec.id,
-        updatedAt: rec.updated_at || new Date(0).toISOString(),
+  if (existsSync(indexPath)) {
+    try {
+      const rl = createInterface({
+        input: createReadStream(indexPath, { encoding: "utf-8" }),
+        crlfDelay: Infinity,
       });
-    }
 
-    entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    return entries;
-  } catch (err: any) {
-    console.error("Error listing codex sessions:", err.message);
-    return [];
+      const records: Array<{ id: string; thread_name?: string; updated_at?: string }> = [];
+      for await (const line of rl) {
+        if (!line) continue;
+        try {
+          const rec = JSON.parse(line);
+          if (rec?.id) records.push(rec);
+        } catch {
+          // ignore malformed lines
+        }
+      }
+
+      for (const rec of records) {
+        seen.add(rec.id);
+        let recCwd = cwdCache.get(rec.id);
+        if (recCwd === undefined) {
+          recCwd = await readSessionCwd(rec.id);
+          cwdCache.set(rec.id, recCwd);
+        }
+        if (recCwd !== cwd) continue;
+        entries.push({
+          id: rec.id,
+          preview: rec.thread_name || rec.id,
+          updatedAt: rec.updated_at || new Date(0).toISOString(),
+        });
+      }
+    } catch (err: any) {
+      console.error("Error reading codex session index:", err.message);
+    }
   }
+
+  // Fallback: codex CLI 0.130.0 does not always append fresh threads to the index.
+  // Walk the rollout files directly so freshly-created threads still show up.
+  if (existsSync(sessionsRoot)) {
+    try {
+      const rollouts = await collectRollouts(sessionsRoot, 200);
+      for (const r of rollouts) {
+        const id = extractIdFromRolloutName(r.name);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const meta = await readSessionMeta(r.path);
+        if (!meta) continue;
+        cwdCache.set(meta.id, meta.cwd);
+        if (meta.cwd !== cwd) continue;
+        entries.push({
+          id: meta.id,
+          preview: `${meta.id.slice(0, 8)}…`,
+          updatedAt: new Date(r.mtimeMs).toISOString(),
+        });
+      }
+    } catch (err: any) {
+      console.error("Error walking codex sessions:", err.message);
+    }
+  }
+
+  entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return entries;
+}
+
+function extractIdFromRolloutName(name: string): string | null {
+  // rollout-<timestamp>-<uuid>.jsonl  →  the uuid is the last 5 dash-separated chunks before .jsonl
+  const m = name.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+  return m ? m[1] : null;
+}
+
+async function collectRollouts(root: string, limit: number): Promise<Array<{ path: string; name: string; mtimeMs: number }>> {
+  const out: Array<{ path: string; name: string; mtimeMs: number }> = [];
+  async function walk(dir: string): Promise<void> {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const full = join(dir, name);
+      let s;
+      try {
+        s = await stat(full);
+      } catch {
+        continue;
+      }
+      if (s.isDirectory()) {
+        await walk(full);
+      } else if (name.endsWith(".jsonl") && name.startsWith("rollout-")) {
+        out.push({ path: full, name, mtimeMs: s.mtimeMs });
+      }
+    }
+  }
+  await walk(root);
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return out.slice(0, limit);
 }
 
 async function readSessionCwd(threadId: string): Promise<string | null> {
   const filePath = await findSessionFile(threadId);
   if (!filePath) return null;
+  return readCwdFromRollout(filePath);
+}
+
+async function readCwdFromRollout(filePath: string): Promise<string | null> {
   try {
     const rl = createInterface({
       input: createReadStream(filePath, { encoding: "utf-8" }),
@@ -437,15 +614,37 @@ async function readSessionCwd(threadId: string): Promise<string | null> {
       if (!line) continue;
       try {
         const entry = JSON.parse(line);
-        if (entry?.type === "session_meta" && entry?.payload?.cwd) {
+        if (entry?.type === "session_meta" && typeof entry?.payload?.cwd === "string") {
           rl.close();
           return entry.payload.cwd as string;
         }
       } catch {
-        // skip
+        // skip malformed line
       }
-      rl.close();
-      return null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function readSessionMeta(filePath: string): Promise<{ id: string; cwd: string } | null> {
+  try {
+    const rl = createInterface({
+      input: createReadStream(filePath, { encoding: "utf-8" }),
+      crlfDelay: Infinity,
+    });
+    for await (const line of rl) {
+      if (!line) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry?.type === "session_meta" && typeof entry?.payload?.cwd === "string" && typeof entry?.payload?.id === "string") {
+          rl.close();
+          return { id: entry.payload.id as string, cwd: entry.payload.cwd as string };
+        }
+      } catch {
+        // skip malformed line
+      }
     }
     return null;
   } catch {
