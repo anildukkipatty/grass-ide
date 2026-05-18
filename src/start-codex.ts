@@ -148,7 +148,6 @@ export async function runAgent(store: SessionStore): Promise<void> {
   const abortController = new AbortController();
   store.abortController = abortController;
   let receivedCompletion = false;
-  let turnSucceeded = false;
 
   try {
     console.log(`[codex] starting turn (resume=${!!store.sdkSessionId})`);
@@ -170,12 +169,10 @@ export async function runAgent(store: SessionStore): Promise<void> {
         throw err;
       }
     }
-    turnSucceeded = store.status !== "error";
   } catch (err: any) {
     console.log("[codex] outer error:", err?.message, err?.stack);
     emitEvent(store, "error", { message: err?.message ?? "Unknown error" });
     store.status = "error";
-    turnSucceeded = false;
   } finally {
     if (isStaging && store.sdkSessionId) {
       const finalDir = join(baseDir, store.sdkSessionId);
@@ -185,16 +182,22 @@ export async function runAgent(store: SessionStore): Promise<void> {
             moveDirContents(attachmentDir, finalDir);
             try { rmSync(attachmentDir, { recursive: true, force: true }); } catch {}
           }
-          if (turnSucceeded && downloaded.length > 0) appendManifest(finalDir, downloaded);
+          if (downloaded.length > 0) appendManifest(finalDir, downloaded);
         } else if (existsSync(attachmentDir)) {
           renameSync(attachmentDir, finalDir);
-          if (turnSucceeded && downloaded.length > 0) writeManifestArray(finalDir, downloaded);
+          if (downloaded.length > 0) writeManifestArray(finalDir, downloaded);
         }
       } catch (err: any) {
         console.error("[codex] failed to promote staging dir:", err?.message);
       }
-    } else if (!isStaging && turnSucceeded && downloaded.length > 0) {
+    } else if (!isStaging && downloaded.length > 0) {
       appendManifest(attachmentDir, downloaded);
+    } else if (isStaging && !store.sdkSessionId && existsSync(attachmentDir)) {
+      try {
+        rmSync(attachmentDir, { recursive: true, force: true });
+      } catch (err: any) {
+        console.error("[codex] failed to clean up orphan staging dir:", err?.message);
+      }
     }
     store.abortController = null;
     store.pendingPermissions.clear();
@@ -371,8 +374,37 @@ export function isPublicHttpUrl(raw: string): boolean {
   if (ipKind === 6) {
     const expanded = host;
     if (expanded === "::1" || expanded === "::" || expanded === "0:0:0:0:0:0:0:1" || expanded === "0:0:0:0:0:0:0:0") return false;
+
+    let v4Parts: number[] | null = null;
+    const v4MappedDotted = expanded.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+    if (v4MappedDotted) {
+      v4Parts = v4MappedDotted[1].split(".").map(Number);
+    } else {
+      const v4MappedHex = expanded.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+      if (v4MappedHex) {
+        const hi = parseInt(v4MappedHex[1], 16);
+        const lo = parseInt(v4MappedHex[2], 16);
+        if (Number.isFinite(hi) && Number.isFinite(lo) && hi >= 0 && hi <= 0xffff && lo >= 0 && lo <= 0xffff) {
+          v4Parts = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
+        }
+      }
+    }
+    if (v4Parts) {
+      if (v4Parts.length !== 4 || v4Parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+      const [a, b] = v4Parts;
+      if (a === 10) return false;
+      if (a === 127) return false;
+      if (a === 0) return false;
+      if (a === 169 && b === 254) return false;
+      if (a === 172 && b >= 16 && b <= 31) return false;
+      if (a === 192 && b === 168) return false;
+      return true;
+    }
+
+    // Other ::xxxx-prefixed addresses we don't explicitly understand: block.
+    if (expanded.startsWith("::")) return false;
+
     const first = expanded.split(":")[0];
-    if (!first) return true;
     const firstNum = parseInt(first, 16);
     if (Number.isFinite(firstNum)) {
       // fc00::/7 — unique-local (fc00–fdff)
