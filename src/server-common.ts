@@ -191,13 +191,14 @@ export type PermissionMode = "ask-permissions" | "allow-all-edits" | "yolo";
 
 export const EDIT_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 
-export const TOOL_BLACKLIST: Record<"claude-code" | "opencode", Set<string>> = {
+export const TOOL_BLACKLIST: Record<"claude-code" | "opencode" | "pi", Set<string>> = {
   "claude-code": new Set(["ExitPlanMode", "AskUserQuestion"]),
   "opencode": new Set(),
+  "pi": new Set(),
 };
 
 export function shouldAutoApprove(
-  agent: "claude-code" | "opencode",
+  agent: "claude-code" | "opencode" | "pi",
   toolName: string,
   mode: PermissionMode
 ): boolean {
@@ -211,7 +212,7 @@ export function shouldAutoApprove(
 export interface SessionStore {
   grassId: string;
   sdkSessionId: string | null;
-  agent: "claude-code" | "opencode";
+  agent: "claude-code" | "opencode" | "pi";
   repoPath: string;
   model?: string;
   mode?: "plan" | "build";
@@ -236,7 +237,7 @@ export const permissionsEmitter = new EventEmitter();
 export interface PermissionDumpItem {
   sessionId: string;
   sdkSessionId: string | null;
-  agent: "claude-code" | "opencode";
+  agent: "claude-code" | "opencode" | "pi";
   repoPath: string;
   repoName: string;
   toolUseID: string;
@@ -338,7 +339,7 @@ export function notifySessionDone(store: SessionStore): void {
 
 export function createSession(
   grassId: string,
-  agent: "claude-code" | "opencode",
+  agent: "claude-code" | "opencode" | "pi",
   repoPath: string,
   model?: string,
   mode?: SessionStore["mode"],

@@ -27,6 +27,7 @@ import {
 } from "./server-common";
 import { initAgent as initClaudeCode, runAgent as runClaudeCode, listSessions as listClaudeSessions, loadTranscript } from "./start-claude-code";
 import { initAgent as initOpencode, runAgent as runOpencode, listSessions as listOpencodeSessions, getSessionHistory, abortSession as opencodeAbort, respondPermission as opencodePermission } from "./start-opencode";
+import { initAgent as initPi, runAgent as runPi, abortSession as piAbort } from "./start-pi";
 import { startRelayMode } from "./relay-client";
 
 export async function handleRequest(
@@ -61,7 +62,7 @@ export async function handleRequest(
     // GET /sessions
     if (method === "GET" && path === "/sessions") {
       const repoPath = query.repoPath ?? workspaceCwd;
-      const agent = query.agent as "claude-code" | "opencode" | undefined;
+      const agent = query.agent as "claude-code" | "opencode" | "pi" | undefined;
 
       if (!agent || agent === "claude-code") {
         const list = await listClaudeSessions(repoPath);
@@ -146,6 +147,12 @@ export async function handleRequest(
         notifyPermissionsChanged();
         emitEvent(store, "aborted", { message: "Aborted by user" });
         scheduleCleanup(store);
+      } else if (store.agent === "pi") {
+        await piAbort(store.grassId).catch(() => {});
+        store.status = "done";
+        notifyPermissionsChanged();
+        emitEvent(store, "aborted", { message: "Aborted by user" });
+        scheduleCleanup(store);
       }
       console.log(`[abort] session ${abortId}`);
       jsonOk(res, { ok: true });
@@ -201,8 +208,8 @@ export async function handleRequest(
       if (attachments != null && (!Array.isArray(attachments) || attachments.some((a: any) => typeof a?.url !== "string" || !a.url))) {
         jsonError(res, 400, "attachments must be an array of { url: string }"); return;
       }
-      if (agent !== "claude-code" && agent !== "opencode") {
-        jsonError(res, 400, "agent must be claude-code or opencode");
+      if (agent !== "claude-code" && agent !== "opencode" && agent !== "pi") {
+        jsonError(res, 400, "agent must be claude-code, opencode, or pi");
         return;
       }
       if (!availableAgents.includes(agent)) {
@@ -240,8 +247,12 @@ export async function handleRequest(
         runClaudeCode(s).catch((err) => {
           console.error("[runAgent] unhandled:", err);
         });
-      } else {
+      } else if (agent === "opencode") {
         runOpencode(s).catch((err) => {
+          console.error("[runAgent] unhandled:", err);
+        });
+      } else {
+        runPi(s).catch((err) => {
           console.error("[runAgent] unhandled:", err);
         });
       }
@@ -362,9 +373,11 @@ export async function start(network: string = "local", portOverride?: number, ca
 
   const claudeAvailable = await initClaudeCode();
   const opencodeAvailable = await initOpencode();
+  const piAvailable = await initPi();
   const availableAgents: string[] = [
     ...(claudeAvailable ? ["claude-code"] : []),
     ...(opencodeAvailable ? ["opencode"] : []),
+    ...(piAvailable ? ["pi"] : []),
   ];
   console.log(`  available agents: ${availableAgents.join(", ") || "none"}`);
 
