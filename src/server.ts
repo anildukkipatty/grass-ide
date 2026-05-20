@@ -1,4 +1,7 @@
 import { randomUUID } from "crypto";
+import { homedir } from "os";
+import { mkdirSync, writeFileSync, chmodSync } from "fs";
+import { join } from "path";
 import http from "node:http";
 import {
   createHttpServer,
@@ -355,6 +358,26 @@ export async function handleRequest(
       }
 
       jsonOk(res, { sessionId: store.grassId, permissionMode: store.permissionMode });
+      return;
+    }
+
+    // POST /pi/auth — write Pi Codex OAuth credentials to ~/.pi/agent/auth.json
+    if (method === "POST" && path === "/pi/auth") {
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || !body["openai-codex"]) {
+        jsonError(res, 400, "authJson with openai-codex key is required");
+        return;
+      }
+      try {
+        const authDir = join(homedir(), ".pi", "agent");
+        mkdirSync(authDir, { recursive: true });
+        const authPath = join(authDir, "auth.json");
+        writeFileSync(authPath, JSON.stringify(body, null, 2), { encoding: "utf8" });
+        chmodSync(authPath, 0o600);
+        jsonOk(res, { ok: true });
+      } catch (err: any) {
+        jsonError(res, 500, `Failed to write auth: ${err.message}`);
+      }
       return;
     }
 

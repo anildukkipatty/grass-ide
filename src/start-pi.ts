@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
-import { createInterface } from "readline";
 import {
   emitEvent,
   scheduleCleanup,
@@ -14,7 +13,7 @@ import {
 interface PiHandle {
   process: ChildProcess;
   emitter: EventEmitter;  // emits "agent_event" with raw Pi JSON events
-  isFirstMessage: boolean;
+  textBuffer: string;     // accumulates text_delta chunks so we always emit full content
 }
 
 const piHandles = new Map<string, PiHandle>();
@@ -37,13 +36,14 @@ export async function initAgent(): Promise<boolean> {
 export async function runAgent(store: SessionStore): Promise<void> {
   const lastUserEvent = [...store.events].reverse().find((e) => e.type === "user_prompt");
   const promptText = (lastUserEvent?.prompt as string) ?? "";
-  const model = store.model ?? "gpt-5-codex";
+  const attachments = lastUserEvent?.attachments as Array<{ url: string }> | undefined;
+  const model = store.model ?? "gpt-5.5";
 
   let handle = piHandles.get(store.grassId);
 
   if (!handle) {
     // First message: spawn Pi in RPC mode
-    const args = ["--mode", "rpc", "--provider", "openai", "--model", model];
+    const args = ["--mode", "rpc", "--provider", "openai-codex", "--model", model];
     let piProcess: ChildProcess;
     try {
       piProcess = spawn("pi", args, {
@@ -59,7 +59,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
     }
 
     const emitter = new EventEmitter();
-    handle = { process: piProcess, emitter, isFirstMessage: true };
+    handle = { process: piProcess, emitter, textBuffer: "" };
     piHandles.set(store.grassId, handle);
 
     // Pipe stderr to our stderr for debugging
@@ -67,15 +67,22 @@ export async function runAgent(store: SessionStore): Promise<void> {
       process.stderr.write(data);
     });
 
-    // Read stdout as JSON lines and re-emit as "agent_event"
-    const rl = createInterface({ input: piProcess.stdout!, crlfDelay: Infinity });
-    rl.on("line", (line) => {
-      if (!line.trim()) return;
-      try {
-        const parsed = JSON.parse(line);
-        emitter.emit("agent_event", parsed);
-      } catch {
-        // ignore non-JSON lines
+    // Pi RPC docs: readline is not protocol-compliant — it splits on U+2028/U+2029
+    // inside JSON strings. Use a manual \n-only splitter instead.
+    let lineBuffer = "";
+    piProcess.stdout!.on("data", (chunk: Buffer) => {
+      lineBuffer += chunk.toString("utf8");
+      const parts = lineBuffer.split("\n");
+      lineBuffer = parts.pop()!; // keep the incomplete trailing fragment
+      for (const line of parts) {
+        const trimmed = line.trimEnd();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          emitter.emit("agent_event", parsed);
+        } catch {
+          // ignore non-JSON startup noise
+        }
       }
     });
 
@@ -93,12 +100,30 @@ export async function runAgent(store: SessionStore): Promise<void> {
       scheduleCleanup(store);
       return;
     }
+
+    // Emit a system event so the client's connection-store gets a session_id.
+    // Without this the "first send" overlay never dismisses (it waits for sdkSessionId).
+    store.sdkSessionId = store.grassId;
+    emitEvent(store, "system", { session_id: store.grassId });
   }
 
-  // Send the right command depending on whether it's the first message
-  const command = handle.isFirstMessage ? "prompt" : "follow_up";
-  handle.isFirstMessage = false;
-  sendCommand(handle.process, { type: command, message: promptText });
+  // Fetch any image attachments and convert to base64 (Pi requires inline base64, not URLs)
+  let piImages: Array<{ type: "image"; data: string; mimeType: string }> | undefined;
+  if (attachments && attachments.length > 0) {
+    const results = await Promise.all(attachments.map(fetchImageAsBase64));
+    const valid = results.filter((r): r is { data: string; mimeType: string } => r !== null);
+    if (valid.length > 0) {
+      piImages = valid.map((r) => ({ type: "image" as const, ...r }));
+    }
+  }
+
+  // Always use "prompt" — Pi RPC uses it for every turn, including follow-ups.
+  // "follow_up" means "queue for after current run", not "continue conversation".
+  sendCommand(handle!.process, {
+    type: "prompt",
+    message: promptText,
+    ...(piImages ? { images: piImages } : {}),
+  });
 
   // Collect events until agent_end or process exit
   await new Promise<void>((resolve) => {
@@ -112,13 +137,12 @@ export async function runAgent(store: SessionStore): Promise<void> {
     };
 
     const onEvent = (event: any) => {
-      const stop = handlePiEvent(event, store);
+      const stop = handlePiEvent(event, store, handle!);
       if (stop) done();
     };
 
     const onExit = (code: number | null) => {
       if (!resolved) {
-        // Process died unexpectedly
         emitEvent(store, "error", { message: `Pi process exited unexpectedly (code ${code ?? "?"})` });
         store.status = "error";
         scheduleCleanup(store);
@@ -160,8 +184,12 @@ function sendCommand(proc: ChildProcess, cmd: object): void {
 /**
  * Map a Pi AgentEvent to grass SSE events.
  * Returns true when the agent has finished (agent_end).
+ *
+ * Key invariant: the connection-store REPLACES the last assistant message content
+ * on each "assistant" SSE event (same as Claude). So we must emit the FULL
+ * accumulated text on every text_delta — not just the delta chunk itself.
  */
-function handlePiEvent(event: any, store: SessionStore): boolean {
+function handlePiEvent(event: any, store: SessionStore, handle: PiHandle): boolean {
   if (!event?.type) return false;
 
   switch (event.type) {
@@ -177,6 +205,8 @@ function handlePiEvent(event: any, store: SessionStore): boolean {
     }
 
     case "turn_start": {
+      // New turn — reset text accumulator so this turn's message starts fresh
+      handle.textBuffer = "";
       emitEvent(store, "status", { status: "thinking" });
       return false;
     }
@@ -184,12 +214,13 @@ function handlePiEvent(event: any, store: SessionStore): boolean {
     case "message_update": {
       const ae = event.assistantMessageEvent;
       if (!ae) return false;
+
       if (ae.type === "text_delta" && ae.delta) {
-        emitEvent(store, "assistant", { content: ae.delta });
+        // Accumulate — emit full content so far (store replaces, not appends)
+        handle.textBuffer += ae.delta;
+        emitEvent(store, "assistant", { content: handle.textBuffer });
       } else if (ae.type === "thinking_delta") {
         emitEvent(store, "status", { status: "thinking" });
-      } else if (ae.type === "toolcall_start" && ae.toolName) {
-        emitEvent(store, "status", { status: "tool", tool_name: ae.toolName });
       }
       return false;
     }
@@ -215,6 +246,18 @@ function handlePiEvent(event: any, store: SessionStore): boolean {
 
     default:
       return false;
+  }
+}
+
+async function fetchImageAsBase64(att: { url: string }): Promise<{ data: string; mimeType: string } | null> {
+  try {
+    const res = await fetch(att.url);
+    if (!res.ok) return null;
+    const mimeType = (res.headers.get("content-type") ?? "image/jpeg").split(";")[0].trim();
+    const buffer = await res.arrayBuffer();
+    return { data: Buffer.from(buffer).toString("base64"), mimeType };
+  } catch {
+    return null;
   }
 }
 
