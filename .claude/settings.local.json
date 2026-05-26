@@ -10,7 +10,9 @@
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(npm view:*)",
       "Bash(npm run build:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(codex --version)",
+      "Read(//Users/korgy/.codex/**)"
     ]
   }
 }
