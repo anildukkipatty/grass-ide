@@ -21,6 +21,8 @@ import {
   buildPermissionsDump,
   buildSessionsDump,
   notifyPermissionsChanged,
+  notifySessionStarted,
+  notifySessionEnded,
   IRequest,
   IResponse,
   type PermissionMode,
@@ -255,18 +257,22 @@ export async function handleRequest(
       }
 
       const s = store;
+      notifySessionStarted();
       if (agent === "claude-code") {
         runClaudeCode(s).catch((err) => {
           console.error("[runAgent] unhandled:", err);
-        });
+        }).finally(() => notifySessionEnded());
       } else if (agent === "codex") {
         runCodex(s).catch((err) => {
+        }).finally(() => notifySessionEnded());
+      } else if (agent === "opencode") {
+        runOpencode(s).catch((err) => {
           console.error("[runAgent] unhandled:", err);
-        });
+        }).finally(() => notifySessionEnded());
       } else {
         runOpencode(s).catch((err) => {
           console.error("[runAgent] unhandled:", err);
-        });
+        }).finally(() => notifySessionEnded());
       }
 
       jsonOk(res, { sessionId: s.grassId });

@@ -1,4 +1,6 @@
 import { networkInterfaces } from "os";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { execSync, execFile, spawn } from "child_process";
 import http from "node:http";
 import { EventEmitter } from "events";
@@ -378,6 +380,41 @@ export function emitEvent(store: SessionStore, type: string, data: Record<string
   const event: StoredEvent = { seq, type, ...data };
   store.events.push(event);
   store.emitter.emit("event", event);
+}
+
+
+let _keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+let _activeSessionCount = 0;
+
+function _pingActivity(): void {
+  const apiUrl = "https://api.codeongrass.com/v1";
+  if (!apiUrl) return;
+  let token: string;
+  try {
+    token = readFileSync(join(process.cwd(), ".grass-relay-token"), "utf8").trim();
+  } catch { return; }
+  if (!token) return;
+  fetch(`${apiUrl}/containers/activity`, {
+    method: "POST",
+    headers: { "x-relay-token": token },
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => {});
+}
+
+export function notifySessionStarted(): void {
+  _activeSessionCount++;
+  if (_keepAliveInterval === null) {
+    _pingActivity();
+    _keepAliveInterval = setInterval(_pingActivity, 10 * 60 * 1000);
+  }
+}
+
+export function notifySessionEnded(): void {
+  _activeSessionCount = Math.max(0, _activeSessionCount - 1);
+  if (_activeSessionCount === 0 && _keepAliveInterval !== null) {
+    clearInterval(_keepAliveInterval);
+    _keepAliveInterval = null;
+  }
 }
 
 // --- HTTP Server ---
