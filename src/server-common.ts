@@ -405,7 +405,7 @@ export function notifySessionStarted(): void {
   _activeSessionCount++;
   if (_keepAliveInterval === null) {
     _pingActivity();
-    _keepAliveInterval = setInterval(_pingActivity, 10 * 60 * 1000);
+    _keepAliveInterval = setInterval(_pingActivity, 2 * 60 * 1000);
   }
 }
 
