@@ -569,6 +569,7 @@ export async function handleWorkspaceRoutes(
   const query = parseQuery(url);
 
   if (method === "GET" && path === "/health") {
+    _pingActivity();
     jsonOk(res, { status: "ok", cwd: workspaceCwd, serverVersion: SERVER_VERSION, clientVersionRange: CLIENT_VERSION_RANGE });
     return true;
   }
