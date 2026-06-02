@@ -385,10 +385,14 @@ export function emitEvent(store: SessionStore, type: string, data: Record<string
 
 let _keepAliveInterval: ReturnType<typeof setInterval> | null = null;
 let _activeSessionCount = 0;
+let _lastPingTime = 0;
 
 function _pingActivity(): void {
+  const now = Date.now();
+  if (now - _lastPingTime < 2 * 60 * 1000) return;
+  _lastPingTime = now;
+
   const apiUrl = "https://api.codeongrass.com/v1";
-  if (!apiUrl) return;
   let token: string;
   try {
     token = readFileSync(join(process.cwd(), ".grass-relay-token"), "utf8").trim();
@@ -398,7 +402,7 @@ function _pingActivity(): void {
     method: "POST",
     headers: { "x-relay-token": token },
     signal: AbortSignal.timeout(10_000),
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 export function notifySessionStarted(): void {
