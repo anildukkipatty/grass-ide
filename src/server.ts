@@ -26,11 +26,14 @@ import {
   IRequest,
   IResponse,
   type PermissionMode,
+  type BotPreset,
 } from "./server-common";
 import { initAgent as initClaudeCode, runAgent as runClaudeCode, listSessions as listClaudeSessions, loadTranscript } from "./start-claude-code";
 import { initAgent as initOpencode, runAgent as runOpencode, listSessions as listOpencodeSessions, getSessionHistory, abortSession as opencodeAbort, respondPermission as opencodePermission } from "./start-opencode";
 import { initAgent as initCodex, runAgent as runCodex, listSessions as listCodexSessions, loadTranscript as loadCodexTranscript } from "./start-codex";
 import { startRelayMode } from "./relay-client";
+import { handleBotRoutes } from "./bot-routes";
+import { getBot, getThread, touchThread } from "./bot-store";
 
 export async function handleRequest(
   req: IRequest,
@@ -60,6 +63,9 @@ export async function handleRequest(
   try {
     // Workspace + file system routes
     if (await handleWorkspaceRoutes(req, res, workspaceCwd, availableAgents)) return;
+
+    // Bot hub: /bots and /threads
+    if (await handleBotRoutes(req, res, workspaceCwd)) return;
 
     // GET /sessions
     if (method === "GET" && path === "/sessions") {
@@ -212,8 +218,31 @@ export async function handleRequest(
     // POST /chat
     if (method === "POST" && path === "/chat") {
       const body = await readBody(req);
-      const { repoPath, agent, prompt, sessionId: existingId, model, mode, permissionMode, attachments } = body;
+      let { repoPath, agent, sessionId: existingId, model, permissionMode } = body;
+      const { prompt, mode, attachments, threadId } = body;
       // attachments: Array<{ url: string }> | undefined
+
+      // A threadId comes from the bot hub: it supplies the repo, the resume handle
+      // and the bot preset, so the client need not repeat them.
+      let botPreset: BotPreset | undefined;
+      if (threadId) {
+        const thread = getThread(threadId);
+        if (!thread) { jsonError(res, 404, "Thread not found"); return; }
+        const bot = getBot(thread.botId);
+        if (!bot) { jsonError(res, 404, "Bot not found"); return; }
+        repoPath = thread.repoPath;
+        agent = "claude-code";
+        existingId = thread.sdkSessionId ?? undefined;
+        model = model ?? bot.model;
+        permissionMode = permissionMode ?? bot.permissionMode;
+        botPreset = {
+          id: bot.id,
+          name: bot.name,
+          instructions: bot.instructions,
+          allowedTools: bot.allowedTools,
+          disallowedTools: bot.disallowedTools,
+        };
+      }
 
       if (!repoPath) { jsonError(res, 400, "repoPath is required"); return; }
       if (!prompt && (!attachments || attachments.length === 0)) {
@@ -245,10 +274,11 @@ export async function handleRequest(
         if (model) store.model = model;
         if (mode) store.mode = mode;
         if (permissionMode) store.permissionMode = permissionMode as PermissionMode;
+        if (threadId) { store.threadId = threadId; store.botPreset = botPreset; }
         emitEvent(store, 'user_prompt', { prompt: prompt ?? '', ...(attachments?.length ? { attachments } : {}) });
       } else {
         const grassId = existingId ?? randomUUID();
-        store = createSession(grassId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined);
+        store = createSession(grassId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined, { threadId, preset: botPreset });
         if (existingId) {
           store.sdkSessionId = existingId;
         }
@@ -257,6 +287,7 @@ export async function handleRequest(
       }
 
       const s = store;
+      if (threadId) touchThread(threadId, prompt ?? '');
       notifySessionStarted();
       if (agent === "claude-code") {
         runClaudeCode(s).catch((err) => {
@@ -390,6 +421,14 @@ export async function handleRequest(
 export async function start(network: string = "local", portOverride?: number, caffeinate: boolean = false, relayUrl?: string) {
   const workspaceCwd = process.cwd();
   console.log(`Starting grass server...`);
+
+  // Claude Code refuses to spawn inside another Claude Code session, which would
+  // otherwise surface only as an opaque "exited with code 1" on the first message.
+  if (process.env.CLAUDECODE) {
+    console.warn(`  warning: CLAUDECODE is set — this shell is inside a Claude Code session.`);
+    console.warn(`  The claude-code agent will refuse to start. Run grass from a plain terminal,`);
+    console.warn(`  or launch it with: env -u CLAUDECODE grass start -p <port>`);
+  }
 
   const claudeAvailable = await initClaudeCode();
   const opencodeAvailable = await initOpencode();

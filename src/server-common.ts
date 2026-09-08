@@ -228,6 +228,18 @@ export interface SessionStore {
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   // Most recent in-flight Task tool callID. Child-session events route here as parent_tool_use_id.
   lastTaskToolUseId?: string;
+  // Bot hub: the thread this session belongs to, and the preset driving it.
+  threadId?: string;
+  botPreset?: BotPreset;
+}
+
+/** The parts of a bot that shape the agent run. Mirrors fields on Bot in bot-store. */
+export interface BotPreset {
+  id: string;
+  name: string;
+  instructions: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
 }
 
 export const sessions = new Map<string, SessionStore>();
@@ -345,7 +357,8 @@ export function createSession(
   repoPath: string,
   model?: string,
   mode?: SessionStore["mode"],
-  permissionMode?: PermissionMode
+  permissionMode?: PermissionMode,
+  bot?: { threadId?: string; preset?: BotPreset }
 ): SessionStore {
   const store: SessionStore = {
     grassId,
@@ -362,6 +375,8 @@ export function createSession(
     abortController: null,
     pendingPermissions: new Map(),
     cleanupTimer: null,
+    threadId: bot?.threadId,
+    botPreset: bot?.preset,
   };
   sessions.set(grassId, store);
   return store;

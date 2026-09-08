@@ -15,6 +15,7 @@ import {
   shouldAutoApprove,
   type SessionStore,
 } from "./server-common";
+import { bindSession } from "./bot-store";
 
 export async function initAgent(): Promise<boolean> {
   try {
@@ -29,6 +30,10 @@ export async function initAgent(): Promise<boolean> {
 export async function runAgent(store: SessionStore): Promise<void> {
   const abortController = new AbortController();
   store.abortController = abortController;
+
+  // The SDK reports a failed spawn as a bare exit code; the child's stderr is
+  // where the actual reason lives, so keep the tail of it for the error event.
+  const stderrTail: string[] = [];
 
   try {
     let modelLogged = false;
@@ -58,6 +63,10 @@ export async function runAgent(store: SessionStore): Promise<void> {
       promptParam = promptText;
     }
 
+    // A bot is a preset: its instructions ride on top of Claude Code's own system
+    // prompt, and its tool lists constrain the run.
+    const preset = store.botPreset;
+
     const q = query({
       prompt: promptParam,
       options: {
@@ -66,6 +75,15 @@ export async function runAgent(store: SessionStore): Promise<void> {
         abortController,
         includePartialMessages: true,
         cwd: store.repoPath,
+        stderr: (data: string) => {
+          stderrTail.push(data);
+          if (stderrTail.length > 20) stderrTail.shift();
+        },
+        ...(preset?.instructions
+          ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: preset.instructions } }
+          : {}),
+        ...(preset?.allowedTools?.length ? { allowedTools: preset.allowedTools } : {}),
+        ...(preset?.disallowedTools?.length ? { disallowedTools: preset.disallowedTools } : {}),
         ...(store.sdkSessionId ? { resume: store.sdkSessionId } : {}),
         canUseTool: (toolName, input, { signal, toolUseID }) => {
           return new Promise((resolve) => {
@@ -99,6 +117,8 @@ export async function runAgent(store: SessionStore): Promise<void> {
           const newSdkId = (msg as any).session_id;
           if (newSdkId && !store.sdkSessionId) {
             store.sdkSessionId = newSdkId;
+            // Bind the hub thread to its transcript the first time we learn the id.
+            if (store.threadId) bindSession(store.threadId, newSdkId);
           }
         }
 
@@ -134,7 +154,10 @@ export async function runAgent(store: SessionStore): Promise<void> {
     }
   } catch (err: any) {
     console.log("[query] outer error:", err?.message, err?.stack);
-    emitEvent(store, "error", { message: err?.message ?? "Unknown error" });
+    const detail = stderrTail.join("").trim();
+    emitEvent(store, "error", {
+      message: detail ? `${err?.message ?? "Agent failed"}\n\n${detail}` : (err?.message ?? "Unknown error"),
+    });
     store.status = "error";
     scheduleCleanup(store);
     return;
