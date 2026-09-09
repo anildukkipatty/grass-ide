@@ -1,7 +1,7 @@
 {
   "name": "gitbot-ai",
-  "version": "0.0.1",
-  "description": "Run Claude Code, Codex, or OpenCode from any device on your network \u2014 a local server that puts an AI coding agent in your browser, with reusable bots, threads, and per-bot setup instructions.",
+  "version": "0.0.2",
+  "description": "Run Claude Code, Codex, or OpenCode from any device on your network — a local server that puts an AI coding agent in your browser, with reusable bots, threads, and per-bot setup instructions.",
   "main": "dist/index.js",
   "bin": {
     "gitbot": "dist/index.js"
@@ -40,6 +40,8 @@
     "@opencode-ai/sdk": "^1.2.15",
     "cli-progress": "^3.12.0",
     "commander": "^14.0.3",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.12",
     "qrcode-terminal": "^0.12.0",
     "ws": "^8.19.0"
   },

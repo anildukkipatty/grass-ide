@@ -274,6 +274,36 @@ export const html = `<!DOCTYPE html>
   .msg.assistant .bubble:empty { display: none; }
   .bubble + .bubble, .tool + .bubble { margin-top: 7px; }
   .msg.error .bubble { background: var(--surface); border: 1px solid var(--danger); color: var(--danger); font-size: 13.5px; }
+
+  /* Markdown, as rendered by marked into assistant bubbles. Margins collapse at
+     the bubble edges so a one-paragraph answer still looks like a chat line. */
+  .bubble.md { white-space: normal; }
+  .bubble.md > :first-child { margin-top: 0; }
+  .bubble.md > :last-child { margin-bottom: 0; }
+  .bubble.md p, .bubble.md ul, .bubble.md ol, .bubble.md pre, .bubble.md blockquote, .bubble.md table { margin: 0 0 10px; }
+  .bubble.md h1, .bubble.md h2, .bubble.md h3, .bubble.md h4 { margin: 16px 0 8px; line-height: 1.3; }
+  .bubble.md h1 { font-size: 18px; }
+  .bubble.md h2 { font-size: 16px; }
+  .bubble.md h3, .bubble.md h4 { font-size: 14.5px; }
+  .bubble.md ul, .bubble.md ol { padding-left: 22px; }
+  .bubble.md li { margin: 3px 0; }
+  .bubble.md li > ul, .bubble.md li > ol { margin: 3px 0; }
+  .bubble.md a { color: var(--accent); }
+  .bubble.md code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    background: var(--surface-2); border-radius: 5px; padding: 1px 5px;
+  }
+  .bubble.md pre {
+    background: var(--surface-2); border-radius: 10px; padding: 10px 12px;
+    overflow-x: auto; white-space: pre; -webkit-overflow-scrolling: touch;
+  }
+  .bubble.md pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.5; }
+  .bubble.md blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--muted); }
+  .bubble.md hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
+  .bubble.md table { border-collapse: collapse; display: block; overflow-x: auto; font-size: 13px; }
+  .bubble.md th, .bubble.md td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
+  .bubble.md th { background: var(--surface-2); }
+  .bubble.md img { max-width: 100%; border-radius: 10px; }
   .who { font-size: 12px; color: var(--faint); margin: 0 4px 4px; }
   .msg.user .who { text-align: right; }
 
@@ -403,6 +433,7 @@ export const html = `<!DOCTYPE html>
     .bar-inner { min-height: 60px; }
   }
 </style>
+<!--vendor-->
 </head>
 <body>
 
@@ -1109,18 +1140,47 @@ export const html = `<!DOCTYPE html>
   /** The bubble text should flow into: the trailing one when the last block is
    *  already text, a fresh one when a tool chip closed it off. Keeps text and
    *  tools interleaved in arrival order instead of piling tools at the bottom. */
-  function bubbleOf(content) {
+  function bubbleOf(content, md) {
     var last = content.lastElementChild;
-    if (last && last.className === "bubble") return last;
-    var b = el("div", "bubble");
+    if (last && last.classList && last.classList.contains("bubble")) return last;
+    var b = el("div", md ? "bubble md" : "bubble");
     content.appendChild(b);
     return b;
   }
 
+  /** Assistant text is markdown: agents write lists, code fences and tables.
+   *  marked renders it, DOMPurify strips anything unsafe the model may have
+   *  echoed back. User and error text stays literal \u2014 nobody wants their
+   *  asterisks eaten. Falls back to plain text if the libs failed to load. */
+  var MD = (function () {
+    if (typeof marked === "undefined" || typeof DOMPurify === "undefined") return null;
+    marked.setOptions({ gfm: true, breaks: true });
+    return function (src) {
+      try { return DOMPurify.sanitize(marked.parse(src)); }
+      catch (e) { return null; }   // malformed input falls back to plain text
+    };
+  })();
+
+  function isAssistant(content) {
+    var row = content.parentNode;
+    return !!(row && row.classList && row.classList.contains("assistant"));
+  }
+
   function appendText(content, text) {
     if (!text) return;
-    var b = bubbleOf(content);
-    b.textContent = b.textContent ? b.textContent + "\\n\\n" + text : text;
+    var md = !!MD && isAssistant(content);
+    var b = bubbleOf(content, md);
+    // The raw source is kept so streamed chunks re-render as one document
+    // rather than each being parsed on its own (a fence can span chunks).
+    b.__md = b.__md ? b.__md + "\\n\\n" + text : text;
+    var out = md ? MD(b.__md) : null;
+    if (out === null) { b.className = "bubble"; b.textContent = b.__md; return; }
+    b.innerHTML = out;
+    var links = b.querySelectorAll("a[href]");
+    for (var i = 0; i < links.length; i++) {
+      links[i].target = "_blank";
+      links[i].rel = "noopener noreferrer";
+    }
   }
 
   function appendTool(content, name, input) {

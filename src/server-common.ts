@@ -6,6 +6,7 @@ import http from "node:http";
 import { EventEmitter } from "events";
 import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
+import { vendorScripts } from "./client-vendor";
 import { listRepos, cloneRepo, createFolder, listDir, readFile, getRepoDetails, browseDirs } from "./workspace";
 
 // --- Transport abstractions ---
@@ -484,7 +485,9 @@ export async function createHttpServer(opts: {
   server.on("request", (req, res) => {
     if (req.method === "GET" && (req.url === "/" || req.url === "")) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(html);
+      // Function replacement: the vendor bundles contain `$&`-style sequences
+      // that a string replacement would interpret.
+      res.end(html.replace("<!--vendor-->", () => vendorScripts()));
     }
     // All other routes handled by server.ts listener
   });
