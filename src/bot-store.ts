@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 import { homedir } from "os";
 
 // --- Types ---
@@ -28,6 +28,8 @@ export interface Thread {
   /** Claude Code session id — the resume handle. Null until the first turn completes. */
   sdkSessionId: string | null;
   title: string;
+  /** True while the title is still auto-derived, so a later turn may improve it. */
+  titleIsAuto?: boolean;
   repoPath: string;
   preview: string;
   messageCount: number;
@@ -138,7 +140,8 @@ export function createThread(botId: string, repoPath: string, title?: string): T
     id: randomUUID(),
     botId,
     sdkSessionId: null,
-    title: title ?? "New thread",
+    title: title ?? defaultTitle(repoPath),
+    titleIsAuto: !title,
     repoPath,
     preview: "",
     messageCount: 0,
@@ -156,6 +159,8 @@ export function updateThread(id: string, patch: Partial<Thread>): Thread | undef
   if (idx === -1) return undefined;
   const { id: _ignored, botId: _bot, createdAt: _created, ...rest } = patch;
   threads[idx] = { ...threads[idx], ...rest, updatedAt: now() };
+  // A title the caller set by hand is the user's, not ours to overwrite.
+  if (rest.title !== undefined && rest.titleIsAuto === undefined) threads[idx].titleIsAuto = false;
   writeCollection(THREADS_FILE, threads);
   return threads[idx];
 }
@@ -188,12 +193,57 @@ export function touchThread(id: string, prompt: string): Thread | undefined {
   const patch: Partial<Thread> = { messageCount: thread.messageCount + 1 };
   if (prompt) {
     patch.preview = prompt.slice(0, 140);
-    if (!thread.preview) patch.title = titleFromPrompt(prompt);
+    // Conversations open with "hi" as often as not, so keep looking for a name
+    // until a turn actually says what the thread is about.
+    if (thread.titleIsAuto !== false) {
+      const derived = titleFromPrompt(prompt);
+      if (derived) { patch.title = derived; patch.titleIsAuto = false; }
+    }
   }
   return updateThread(id, patch);
 }
 
-function titleFromPrompt(prompt: string): string {
-  const firstLine = prompt.trim().split("\n")[0].trim();
-  return firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine || "New thread";
+/** A thread with no turns yet is named after the folder it will run in. */
+function defaultTitle(repoPath: string): string {
+  const folder = basename(repoPath || "").trim();
+  return folder ? `New thread in ${folder}` : "New thread";
+}
+
+/** Prompts that name nothing: greetings, acknowledgements, nudges. */
+const LOW_SIGNAL = /^(?:hi|hey|hello|yo|sup|hiya|howdy|good (?:morning|afternoon|evening)|greetings|thanks|thank you|ty|ok|okay|k|kk|cool|nice|great|got it|sure|yes|yep|yeah|no|nope|nah|continue|carry on|go on|go ahead|proceed|next|more|again|do it|please do|test|testing|ping|\?+|.)[\s!.,?]*$/i;
+
+/** Openers that carry no meaning in a list of thread names. */
+const FILLER = /^(?:hey|hi|hello|ok|okay|so|now|please|pls|can you(?: please)?|could you(?: please)?|would you(?: please)?|i want you to|i need you to|i'd like you to|let's|lets|help me|i want to|i need to)\b[\s,:-]*/i;
+
+/**
+ * Names a thread after a prompt, or returns null when the prompt says too
+ * little to name anything. The aim is a label that reads well in a list: one
+ * short phrase, no markdown scaffolding, no mid-word cut.
+ */
+function titleFromPrompt(prompt: string): string | null {
+  let text = prompt
+    .replace(/```[\s\S]*?```/g, " ")           // fenced code says nothing useful
+    .replace(/`([^`]*)`/g, "$1")               // keep inline code, drop the ticks
+    .replace(/^\s*(?:[#>*\-+]+|\d+[.)])\s*/gm, "") // markdown bullets/headings
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (LOW_SIGNAL.test(text)) return null;
+
+  // Strip leading pleasantries ("hi, can you please ..."), then cut at the
+  // first sentence end.
+  for (let prev = ""; prev !== text; ) { prev = text; text = text.replace(FILLER, "").trim(); }
+  const sentence = text.match(/^[^.!?\n]{8,}?(?=[.!?](?:\s|$))/);
+  if (sentence) text = sentence[0].trim();
+  text = text.replace(/[\s,;:.\-]+$/, "");
+  // Two words or a handful of characters is a fragment, not a name.
+  if (text.length < 12 || text.split(" ").length < 3) return null;
+
+  const MAX = 52;
+  if (text.length > MAX) {
+    const cut = text.slice(0, MAX);
+    const space = cut.lastIndexOf(" ");
+    text = (space > 20 ? cut.slice(0, space) : cut).replace(/[\s,;:.\-]+$/, "") + "\u2026";
+  }
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

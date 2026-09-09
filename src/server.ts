@@ -155,6 +155,18 @@ export async function handleRequest(
       return;
     }
 
+    // GET /sessions/:id/permissions — which tool requests are still awaiting an
+    // answer. A client rejoining a running turn replays events it has already
+    // seen, and must not re-offer approvals that were resolved while it was away.
+    const permsId = parsePathParam(path, "/sessions/")?.replace(/\/permissions$/, "");
+    if (method === "GET" && path.endsWith("/permissions") && permsId) {
+      const store = sessions.get(permsId)
+        ?? [...sessions.values()].find(s => s.sdkSessionId === permsId);
+      if (!store) { jsonError(res, 404, "Session not found"); return; }
+      jsonOk(res, { pending: [...store.pendingPermissions.keys()] });
+      return;
+    }
+
     // POST /sessions/:id/abort
     const abortId = parsePathParam(path, "/sessions/")?.replace(/\/abort$/, "");
     if (method === "POST" && path.endsWith("/abort") && abortId) {

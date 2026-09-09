@@ -66,6 +66,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
     // A bot is a preset: its instructions ride on top of Claude Code's own system
     // prompt, and its tool lists constrain the run.
     const preset = store.botPreset;
+    const append = preset?.instructions ? botSystemPrompt(preset) : undefined;
 
     const q = query({
       prompt: promptParam,
@@ -79,8 +80,8 @@ export async function runAgent(store: SessionStore): Promise<void> {
           stderrTail.push(data);
           if (stderrTail.length > 20) stderrTail.shift();
         },
-        ...(preset?.instructions
-          ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: preset.instructions } }
+        ...(append
+          ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append } }
           : {}),
         ...(preset?.allowedTools?.length ? { allowedTools: preset.allowedTools } : {}),
         ...(preset?.disallowedTools?.length ? { disallowedTools: preset.disallowedTools } : {}),
@@ -184,6 +185,26 @@ export async function continueAgent(store: SessionStore, prompt: string): Promis
   await runAgent(store);
 }
 
+/**
+ * Frames a bot's instructions as a standing job. The instructions alone read as
+ * background colour, so a bare "hi" often gets a greeting back instead of the
+ * work; naming the job and saying when to start it makes the first turn reliable.
+ */
+function botSystemPrompt(preset: NonNullable<SessionStore["botPreset"]>): string {
+  return [
+    `You are "${preset.name}", an agent with one standing job in this workspace.`,
+    "",
+    "YOUR JOB:",
+    preset.instructions.trim(),
+    "",
+    "Start this job on the user's first message of the conversation, whatever that",
+    "message says — a greeting such as \"hi\" is a signal to begin, not small talk.",
+    "Do not ask what to work on and do not wait for a restatement of the job; the",
+    "job above is the request. Afterwards, follow the user's messages as usual,",
+    "keeping the job's constraints in force for the rest of the conversation.",
+  ].join("\n");
+}
+
 function formatMessage(
   msg: SDKMessage,
 ): Record<string, unknown> | Record<string, unknown>[] | null {
@@ -194,24 +215,26 @@ function formatMessage(
     case "assistant": {
       const payloads: Record<string, unknown>[] = [];
 
-      const text = msg.message.content
-        .filter((block: any) => block.type === "text")
-        .map((block: any) => block.text)
-        .join("");
-      if (text) {
-        payloads.push({ type: "assistant", content: text });
-      }
-
-      for (const block of msg.message.content) {
-        if ((block as any).type === "tool_use") {
-          const b = block as any;
+      // Walk the blocks in order so the client can paint text and tool calls
+      // where they actually happened; consecutive text blocks coalesce.
+      let text = "";
+      const flushText = () => {
+        if (text) payloads.push({ type: "assistant", content: text });
+        text = "";
+      };
+      for (const block of msg.message.content as any[]) {
+        if (block.type === "text") {
+          text += block.text;
+        } else if (block.type === "tool_use") {
+          flushText();
           payloads.push({
             type: "tool_use",
-            tool_name: b.name,
-            tool_input: formatToolInput(b.name, b.input),
+            tool_name: block.name,
+            tool_input: formatToolInput(block.name, block.input),
           });
         }
       }
+      flushText();
 
       return payloads.length === 1 ? payloads[0] : payloads.length > 1 ? payloads : null;
     }

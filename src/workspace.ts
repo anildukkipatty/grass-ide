@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { mkdir, readdir, stat, readFile as fsReadFile } from "fs/promises";
 import { join, resolve, extname } from "path";
+import { homedir } from "os";
 import { execSync } from "child_process";
 
 export interface RepoInfo {
@@ -144,4 +145,31 @@ export function cloneRepo(url: string, workspaceDir: string): string {
     stdio: "pipe",
   });
   return join(workspaceDir, folderName);
+}
+
+export interface BrowseResult {
+  path: string;              // absolute path being listed
+  parent: string | null;     // absolute path one level up, null at the filesystem root
+  workspace: string;         // the directory the CLI was started in
+  home: string;              // the user's home directory
+  dirs: { name: string; path: string }[];
+}
+
+// List the subdirectories of dirPath for the folder picker. The picker roams the
+// whole filesystem: a thread may run anywhere the CLI's own user can read.
+export async function browseDirs(dirPath: string, workspaceDir: string): Promise<BrowseResult> {
+  const target = resolve(dirPath);
+  const entries = await readdir(target, { withFileTypes: true });
+  const dirs = entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+    .map((e) => ({ name: e.name, path: join(target, e.name) }))
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  const up = resolve(target, "..");
+  return {
+    path: target,
+    parent: up === target ? null : up,
+    workspace: resolve(workspaceDir),
+    home: homedir(),
+    dirs,
+  };
 }

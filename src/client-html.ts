@@ -130,6 +130,17 @@ export const html = `<!DOCTYPE html>
     color: var(--faint); font-size: 12px; padding-top: 2px;
   }
   .card .foot .dot { margin-left: auto; }
+  /* A card is a button, so its share affordance is a span acting as one. */
+  .card .share {
+    position: absolute; top: 12px; right: 12px; z-index: 1;
+    display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px;
+    color: var(--faint); font-size: 14px; line-height: 1; cursor: pointer;
+    opacity: 0; transition: opacity .14s ease, background .14s ease, color .14s ease;
+  }
+  .card:hover .share, .card .share:focus-visible { opacity: 1; }
+  .card .share:hover { background: var(--surface-2); color: var(--text); }
+  @media (hover: none) { .card .share { opacity: 1; } }
+
   .new-card {
     display: grid; place-items: center; gap: 8px; min-height: 178px;
     border: 1.5px dashed var(--border); border-radius: var(--radius); color: var(--muted);
@@ -169,6 +180,12 @@ export const html = `<!DOCTYPE html>
   .thread .body { flex: 1; min-width: 0; }
   .thread .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thread .prev { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+  .thread .path {
+    display: inline-block; max-width: 100%; margin-top: 5px; font-size: 11.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--faint);
+    background: var(--surface-2); border-radius: 6px; padding: 1px 6px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr;
+  }
   .thread .meta { color: var(--faint); font-size: 12px; flex: none; text-align: right; }
   .thread .kill { opacity: 0; color: var(--faint); font-size: 17px; padding: 4px 6px; border-radius: 8px; flex: none; }
   .thread:hover .kill { opacity: 1; }
@@ -189,6 +206,7 @@ export const html = `<!DOCTYPE html>
   .msg.user .bubble { background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 5px; }
   .msg.assistant .bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 5px; box-shadow: var(--shadow-sm); }
   .msg.assistant .bubble:empty { display: none; }
+  .bubble + .bubble, .tool + .bubble { margin-top: 7px; }
   .msg.error .bubble { background: var(--surface); border: 1px solid var(--danger); color: var(--danger); font-size: 13.5px; }
   .who { font-size: 12px; color: var(--faint); margin: 0 4px 4px; }
   .msg.user .who { text-align: right; }
@@ -263,6 +281,55 @@ export const html = `<!DOCTYPE html>
   .acts { display: flex; gap: 9px; justify-content: flex-end; align-items: center; margin-top: 22px; }
   .acts .spacer { flex: 1; }
 
+  /* --- Folder picker --- */
+  .pathbar {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    color: var(--muted); background: var(--surface-2); border-radius: 10px;
+    padding: 9px 12px; margin-bottom: 10px; overflow-wrap: anywhere;
+  }
+  .jumps { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+  .chip {
+    padding: 5px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 550;
+    border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .picker {
+    border: 1px solid var(--border); border-radius: 12px; background: var(--bg);
+    max-height: 46vh; overflow-y: auto;
+  }
+  .picker-row {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 10px 13px; border-bottom: 1px solid var(--border); font-size: 14px;
+  }
+  .picker-row:last-child { border-bottom: 0; }
+  .picker-row:hover { background: var(--surface-2); }
+  .picker-row .ic { flex: none; font-size: 15px; line-height: 1; }
+  .picker-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-note { padding: 20px 13px; text-align: center; color: var(--faint); font-size: 13.5px; }
+
+  /* --- Sharing --- */
+  .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    width: 100%; min-height: 96px; resize: vertical; overflow-wrap: anywhere;
+    padding: 10px 12px; border-radius: 11px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--muted); outline: none;
+  }
+  .preview {
+    display: flex; align-items: center; gap: 12px; margin: 4px 0 16px;
+    background: var(--surface-2); border-radius: 12px; padding: 12px 14px;
+  }
+  .preview .nm { font-weight: 600; }
+  .preview .ds { color: var(--muted); font-size: 13px; }
+  .preview .bad { color: var(--danger); font-size: 13.5px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+    z-index: 40; padding: 10px 18px; border-radius: 999px;
+    background: var(--text); color: var(--bg); font-size: 13.5px; font-weight: 550;
+    box-shadow: var(--shadow-md); animation: rise .18s ease;
+  }
+  @keyframes rise { from { opacity: 0; transform: translate(-50%, 8px); } }
+
   @media (max-width: 640px) {
     .wrap { padding: 0 16px; }
     .grid { grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -276,6 +343,7 @@ export const html = `<!DOCTYPE html>
 <section class="view active" id="view-home">
   <div class="bar"><div class="wrap bar-inner">
     <h1>Your bots</h1>
+    <button class="btn ghost" id="import-bot">Import</button>
     <button class="btn primary" id="new-bot"><span>+</span> New bot</button>
   </div></div>
   <div class="scroll"><div class="wrap"><div class="grid" id="grid"></div></div></div>
@@ -287,6 +355,7 @@ export const html = `<!DOCTYPE html>
     <button class="back" id="to-home"><span class="chev">&lsaquo;</span> Bots</button>
     <div class="avatar sm" id="bot-avatar"></div>
     <div class="bar-title"><h2 id="bot-name"></h2></div>
+    <button class="btn ghost" id="share-bot">Share</button>
     <button class="btn ghost" id="edit-bot">Edit</button>
   </div></div>
   <div class="scroll"><div class="wrap">
@@ -337,12 +406,16 @@ export const html = `<!DOCTYPE html>
   var sessionId = null;
   var stream = null;
   var liveBubble = null;
-  var runningThreadId = null;
+  // Turns that are still running server-side, keyed by thread. A turn outlives
+  // the screen it was started from, so this is what lets us rejoin one.
+  var live = {};              // threadId -> sessionId
+  var streamThreadId = null;  // thread the open EventSource belongs to
 
   // Turn lifecycle. "idle" is the only state in which the button sends;
   // otherwise it stops. "aborting" waits for the agent to confirm.
   var state = "idle";         // idle | starting | running | aborting
   var pendingPerms = 0;
+  var pendingFilter = null;   // during catch-up: tool requests still unanswered
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -393,6 +466,26 @@ export const html = `<!DOCTYPE html>
     return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
 
+  /**
+   * A working directory is only recognisable by its tail, so show the last
+   * whole segments that fit and mark the elision with a leading ellipsis.
+   */
+  function shortPath(p, max) {
+    if (!p) return "";
+    max = max || 22;
+    // Empty segments from a leading or trailing slash fall out with the filter.
+    var parts = p.split("/").filter(Boolean);
+    if (!parts.length) return p;
+    var out = parts[parts.length - 1];
+    if (out.length > max) out = "\u2026" + out.slice(out.length - max + 1);
+    for (var i = parts.length - 2; i >= 0; i--) {
+      var next = parts[i] + "/" + out;
+      if (next.length > max) return "\u2026/" + out;
+      out = next;
+    }
+    return (p.charAt(0) === "/" ? "/" : "") + out;
+  }
+
   // --- Navigation: depth, not columns ---
   function setView(next, push) {
     view = next;
@@ -422,11 +515,16 @@ export const html = `<!DOCTYPE html>
     activeThread = null;
     setView("bot", push);
     renderThreads();
+    // Refresh in the background so a turn that ended while we were inside the
+    // thread stops showing as running, and titles pick up the latest turn.
+    loadThreads().catch(function () {});
   }
 
   // --- Home ---
   function loadRoster() {
-    return Promise.all([api("/bots"), api("/threads")]).then(function (r) {
+    return pruneLive().then(function () {
+      return Promise.all([api("/bots"), api("/threads")]);
+    }).then(function (r) {
       bots = r[0].bots || [];
       allThreads = r[1].threads || [];
       renderRoster();
@@ -460,10 +558,21 @@ export const html = `<!DOCTYPE html>
 
       var foot = el("div", "foot");
       foot.appendChild(el("span", null, mine.length ? mine.length + (mine.length === 1 ? " thread" : " threads") : "No threads"));
-      var live = mine.some(function (t) { return t.id === runningThreadId; });
-      if (live) foot.appendChild(el("span", "dot live", "running"));
+      var anyLive = mine.some(function (t) { return !!live[t.id]; });
+      if (anyLive) foot.appendChild(el("span", "dot live", "running"));
       else if (mine.length) foot.appendChild(el("span", "dot", relTime(mine[0].updatedAt)));
       card.appendChild(foot);
+
+      var share = el("span", "share", "\u2934");
+      share.setAttribute("role", "button");
+      share.setAttribute("tabindex", "0");
+      share.title = "Copy a share code for " + bot.name;
+      share.setAttribute("aria-label", "Share " + bot.name);
+      share.onclick = function (ev) { ev.stopPropagation(); shareBot(bot); };
+      share.onkeydown = function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); shareBot(bot); }
+      };
+      card.appendChild(share);
 
       card.onclick = function () { openBot(bot); };
       grid.appendChild(card);
@@ -495,10 +604,22 @@ export const html = `<!DOCTYPE html>
 
   function loadThreads() {
     if (!activeBot) return Promise.resolve();
-    return api("/threads?botId=" + encodeURIComponent(activeBot.id)).then(function (d) {
+    return pruneLive().then(function () {
+      return api("/threads?botId=" + encodeURIComponent(activeBot.id));
+    }).then(function (d) {
       threads = d.threads || [];
       // Keep the roster's counts honest without a second round trip.
       allThreads = allThreads.filter(function (t) { return t.botId !== activeBot.id; }).concat(threads);
+      // A thread can be renamed by the turn that just ran, so keep the open
+      // thread's header in step with the list.
+      if (activeThread) {
+        for (var i = 0; i < threads.length; i++) {
+          if (threads[i].id !== activeThread.id) continue;
+          activeThread = threads[i];
+          $("thread-title").textContent = threads[i].title;
+          break;
+        }
+      }
       renderThreads();
     });
   }
@@ -524,10 +645,13 @@ export const html = `<!DOCTYPE html>
       var body = el("div", "body");
       body.appendChild(el("div", "title", t.title));
       body.appendChild(el("div", "prev", t.preview || "No messages yet"));
+      var where = el("div", "path", shortPath(t.repoPath));
+      where.title = t.repoPath || "";
+      body.appendChild(where);
       row.appendChild(body);
 
       var meta = el("div", "meta");
-      if (t.id === runningThreadId) meta.appendChild(el("span", "dot live", "running"));
+      if (live[t.id]) meta.appendChild(el("span", "dot live", "running"));
       else meta.appendChild(el("div", null, relTime(t.updatedAt)));
       row.appendChild(meta);
 
@@ -547,9 +671,101 @@ export const html = `<!DOCTYPE html>
 
   function newThread() {
     if (!activeBot) return;
-    api("/threads", { method: "POST", body: { botId: activeBot.id } })
-      .then(function (d) { return loadThreads().then(function () { openThread(d.thread); }); })
-      .catch(showError);
+    // A thread is pinned to a folder for its whole life, so the folder is
+    // chosen up front rather than argued about later.
+    openFolderPicker(activeBot.repoPath || null, function (repoPath) {
+      api("/threads", { method: "POST", body: { botId: activeBot.id, repoPath: repoPath || undefined } })
+        .then(function (d) { return loadThreads().then(function () { openThread(d.thread); }); })
+        .catch(showError);
+    });
+  }
+
+  /**
+   * Pick the directory a thread runs in. Browsing is confined to the directory
+   * the CLI was started in and roams from there; "Use default" skips the choice,
+   * which leaves the server to fall back to the bot's directory or its own.
+   */
+  function openFolderPicker(startPath, onPick) {
+    var backdrop = el("div", "backdrop");
+    var modal = el("div", "modal");
+    modal.appendChild(el("h2", null, "Where should this thread run?"));
+
+    var jumps = el("div", "jumps");
+    var pathbar = el("div", "pathbar", "\u2026");
+    var list = el("div", "picker");
+    modal.appendChild(jumps);
+    modal.appendChild(pathbar);
+    modal.appendChild(list);
+
+    var current = null;
+
+    function jump(label, path) {
+      var b = el("button", "chip", label);
+      b.title = path;
+      b.onclick = function () { load(path); };
+      jumps.appendChild(b);
+    }
+
+    function row(icon, name, onClick) {
+      var r = el("button", "picker-row");
+      r.appendChild(el("span", "ic", icon));
+      r.appendChild(el("span", "nm", name));
+      r.onclick = onClick;
+      list.appendChild(r);
+      return r;
+    }
+
+    function load(path) {
+      return api("/browse" + (path ? "?path=" + encodeURIComponent(path) : ""))
+        .then(function (d) {
+          current = d.path;
+          pathbar.textContent = d.path;
+          jumps.innerHTML = "";
+          jump("Workspace", d.workspace);
+          jump("Home", d.home);
+          jump("/", "/");
+          list.innerHTML = "";
+          if (d.parent) row("\u2191", "..", function () { load(d.parent); });
+          (d.dirs || []).forEach(function (dir) {
+            row("\u{1F4C1}", dir.name, function () { load(dir.path); });
+          });
+          if (!d.dirs.length && !d.parent) {
+            list.appendChild(el("div", "picker-note", "No subfolders here."));
+          }
+        })
+        .catch(function (err) {
+          // A remembered folder can be gone or unreadable; the workspace is
+          // always browsable, so fall back to it.
+          if (path) return load(null);
+          showError(err);
+        });
+    }
+
+    var acts = el("div", "acts");
+    var def = el("button", "btn ghost", "Use default");
+    def.title = "Run where the CLI was started (or the bot's directory)";
+    def.onclick = function () { backdrop.remove(); onPick(null); };
+    acts.appendChild(def);
+    acts.appendChild(el("div", "spacer"));
+    var cancel = el("button", "btn", "Cancel");
+    cancel.onclick = function () { backdrop.remove(); };
+    var pick = el("button", "btn primary", "Run here");
+    pick.onclick = function () {
+      if (!current) return;
+      backdrop.remove();
+      onPick(current);
+    };
+    acts.appendChild(cancel);
+    acts.appendChild(pick);
+    modal.appendChild(acts);
+
+    backdrop.appendChild(modal);
+    backdrop.onclick = function (ev) { if (ev.target === backdrop) backdrop.remove(); };
+    document.addEventListener("keydown", function esc(ev) {
+      if (ev.key === "Escape") { backdrop.remove(); document.removeEventListener("keydown", esc); }
+    });
+    document.body.appendChild(backdrop);
+    load(startPath);
   }
 
   // --- Thread ---
@@ -557,7 +773,8 @@ export const html = `<!DOCTYPE html>
     activeThread = thread;
     detach();
     $("thread-title").textContent = thread.title;
-    $("thread-sub").textContent = thread.repoPath;
+    $("thread-sub").textContent = shortPath(thread.repoPath, 30);
+    $("thread-sub").title = thread.repoPath || "";
     $("to-bot-label").textContent = activeBot ? activeBot.name : "Back";
     var av = $("thread-avatar");
     av.textContent = activeBot ? (activeBot.emoji || "\\u{1F916}") : "\\u{1F916}";
@@ -566,6 +783,11 @@ export const html = `<!DOCTYPE html>
     setState("idle");
     setActivity("");
     setView("thread");
+
+    // If this thread's turn is still running, rejoin it rather than rendering a
+    // transcript that stops short of what the agent is doing right now.
+    var sid = live[thread.id];
+    if (sid) return rejoin(thread, sid);
     return loadMessages();
   }
 
@@ -574,29 +796,33 @@ export const html = `<!DOCTYPE html>
     box.innerHTML = "";
     if (!activeThread) return Promise.resolve();
     return api("/threads/" + activeThread.id + "/messages").then(function (d) {
-      var msgs = d.messages || [];
-      if (!msgs.length) {
-        var e = el("div", "empty");
-        e.appendChild(el("h3", null, "Say the first thing"));
-        e.appendChild(el("p", null, activeBot ? activeBot.name + " already knows its job \\u2014 tell it what to do this time." : "Send a message to start."));
-        box.appendChild(e);
-        return;
-      }
-      msgs.forEach(function (m) {
-        var kind = m.role === "user" ? "user" : "assistant";
-        var content = startMessage(kind);
-        (m.content || []).forEach(function (b) {
-          if (b.type === "text") appendText(content, b.text);
-          else if (b.type === "tool_use") appendTool(content, b.tool_name, b.tool_input);
-          else if (b.type === "image_url") {
-            var img = document.createElement("img");
-            img.src = b.url; img.style.maxWidth = "100%"; img.style.borderRadius = "12px";
-            content.appendChild(img);
-          }
-        });
-      });
-      scrollDown();
+      renderTranscript(d.messages || []);
     });
+  }
+
+  function renderTranscript(msgs) {
+    var box = $("messages-inner");
+    box.innerHTML = "";
+    if (!msgs.length) {
+      var e = el("div", "empty");
+      e.appendChild(el("h3", null, "Say the first thing"));
+      e.appendChild(el("p", null, activeBot ? activeBot.name + " already knows its job \\u2014 tell it what to do this time." : "Send a message to start."));
+      box.appendChild(e);
+      return;
+    }
+    msgs.forEach(function (m) {
+      var content = startMessage(m.role === "user" ? "user" : "assistant");
+      (m.content || []).forEach(function (b) {
+        if (b.type === "text") appendText(content, b.text);
+        else if (b.type === "tool_use") appendTool(content, b.tool_name, b.tool_input);
+        else if (b.type === "image_url") {
+          var img = document.createElement("img");
+          img.src = b.url; img.style.maxWidth = "100%"; img.style.borderRadius = "12px";
+          content.appendChild(img);
+        }
+      });
+    });
+    scrollDown();
   }
 
   /** Opens a message row and returns its content column, ready for blocks. */
@@ -609,14 +835,22 @@ export const html = `<!DOCTYPE html>
     if (kind === "assistant" && activeBot) row.appendChild(avatar(activeBot, "sm"));
     var content = el("div", "content");
     if (kind === "assistant" && activeBot) content.appendChild(el("div", "who", activeBot.name));
-    content.appendChild(el("div", "bubble"));
     row.appendChild(content);
     box.appendChild(row);
     scrollDown();
     return content;
   }
 
-  function bubbleOf(content) { return content.querySelector(".bubble"); }
+  /** The bubble text should flow into: the trailing one when the last block is
+   *  already text, a fresh one when a tool chip closed it off. Keeps text and
+   *  tools interleaved in arrival order instead of piling tools at the bottom. */
+  function bubbleOf(content) {
+    var last = content.lastElementChild;
+    if (last && last.className === "bubble") return last;
+    var b = el("div", "bubble");
+    content.appendChild(b);
+    return b;
+  }
 
   function appendText(content, text) {
     if (!text) return;
@@ -653,15 +887,17 @@ export const html = `<!DOCTYPE html>
     input.style.height = "auto";
     appendText(startMessage("user"), text);
     setState("starting");
-    setActivity("Sending\\u2026");
-    runningThreadId = activeThread.id;
+    setActivity("Sending\u2026");
 
-    api("/chat", { method: "POST", body: { threadId: activeThread.id, prompt: text } })
+    var threadId = activeThread.id;
+    api("/chat", { method: "POST", body: { threadId: threadId, prompt: text } })
       .then(function (d) {
         sessionId = d.sessionId;
+        live[threadId] = d.sessionId;
+        streamThreadId = threadId;
         setState("running");
-        setActivity("Thinking\\u2026");
-        openStream(d.sessionId);
+        setActivity("Thinking\u2026");
+        attachStream(d.sessionId, function (type, data, ev) { handleEvent(type, data, ev, false); });
         loadThreads();
       })
       .catch(function (err) { showError(err); finishTurn(); });
@@ -672,64 +908,152 @@ export const html = `<!DOCTYPE html>
   function abort() {
     if (!sessionId || state === "idle" || state === "aborting") return;
     setState("aborting");
-    setActivity("Stopping\\u2026");
+    setActivity("Stopping\u2026");
     api("/sessions/" + encodeURIComponent(sessionId) + "/abort", { method: "POST" })
       .catch(function (err) { showError(err); finishTurn(); });
   }
 
-  function openStream(id) {
+  /**
+   * Rejoins a turn that is still running after we navigated away. /events
+   * replays the whole turn before going live, so the catch-up is free — but the
+   * transcript on disk may already hold part of that same turn. So: buffer the
+   * replay, use its prompt to trim the overlap off the transcript, paint the
+   * history, then let the buffered events through.
+   */
+  function rejoin(thread, sid) {
+    sessionId = sid;
+    streamThreadId = thread.id;
+    setState("running");
+    setActivity("Catching up\u2026");
+
+    var buffer = [];
+    var flushed = false;
+    var prompt = null;
+    var promptSeen = false;
+    pendingFilter = null;
+
+    attachStream(sid, function (type, data, ev) {
+      if (flushed) { handleEvent(type, data, ev, false); return; }
+      if (type === "user_prompt") { prompt = data.prompt || ""; promptSeen = true; }
+      buffer.push([type, data, ev]);
+    });
+
+    var transcript = api("/threads/" + thread.id + "/messages").catch(function () { return { messages: [] }; });
+
+    // Approvals resolved while we were away must not be offered again.
+    var pending = api("/sessions/" + encodeURIComponent(sid) + "/permissions")
+      .then(function (d) { pendingFilter = d.pending || []; })
+      .catch(function () { pendingFilter = []; });
+
+    // Give the replay a moment to arrive; it is written the instant we connect,
+    // but don't hang the screen on it if the turn produced nothing yet.
+    var settled = new Promise(function (resolve) {
+      var waited = 0;
+      (function tick() {
+        if (promptSeen || waited >= 600) return resolve();
+        waited += 50;
+        setTimeout(tick, 50);
+      })();
+    });
+
+    return Promise.all([transcript, settled, pending]).then(function (r) {
+      if (activeThread !== thread) return;   // navigated away again
+      renderTranscript(trimInFlight(r[0].messages || [], prompt));
+      flushed = true;
+      buffer.forEach(function (item) { handleEvent(item[0], item[1], item[2], true); });
+      buffer = [];
+      pendingFilter = null;
+      scrollDown();
+    });
+  }
+
+  /** Drops the tail of the transcript belonging to the turn still in flight,
+   *  identified by the prompt that started it. */
+  function trimInFlight(messages, prompt) {
+    if (!prompt) return messages;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var m = messages[i];
+      if (m.role !== "user") continue;
+      var text = (m.content || []).filter(function (b) { return b.type === "text"; })
+        .map(function (b) { return b.text; }).join("\\n\\n");
+      if (text.trim() === prompt.trim()) return messages.slice(0, i);
+    }
+    return messages;
+  }
+
+  // Every event type the agent emits on the turn stream.
+  var STREAM_EVENTS = ["user_prompt", "assistant", "tool_use", "status", "permission_request", "aborted", "done", "result", "error"];
+
+  function attachStream(sid, onEvent) {
     closeStream();
     liveBubble = null;
-    stream = new EventSource("/events?sessionId=" + encodeURIComponent(id));
-
-    stream.addEventListener("assistant", function (ev) {
-      var d = JSON.parse(ev.data);
-      if (!liveBubble) liveBubble = startMessage("assistant");
-      appendText(liveBubble, d.content);
-      scrollDown();
+    stream = new EventSource("/events?sessionId=" + encodeURIComponent(sid));
+    STREAM_EVENTS.forEach(function (type) {
+      stream.addEventListener(type, function (ev) {
+        var data = {};
+        if (ev.data) { try { data = JSON.parse(ev.data); } catch (e) {} }
+        onEvent(type, data, ev);
+      });
     });
+  }
 
-    stream.addEventListener("tool_use", function (ev) {
-      var d = JSON.parse(ev.data);
-      if (!liveBubble) liveBubble = startMessage("assistant");
-      appendTool(liveBubble, d.tool_name, d.tool_input);
-    });
+  /** Renders one stream event. In catch-up mode the prompt that started the
+   *  turn still needs painting; on the live path we already showed it. */
+  function handleEvent(type, data, ev, replay) {
+    switch (type) {
+      case "user_prompt":
+        if (replay && data.prompt) appendText(startMessage("user"), data.prompt);
+        break;
 
-    stream.addEventListener("status", function (ev) {
-      var d = JSON.parse(ev.data);
-      if (state === "aborting") return;
-      if (d.status === "thinking") setActivity("Thinking\\u2026");
-      else if (d.status === "tool") setActivity("Running " + (d.tool_name || "tool") + "\\u2026");
-      else if (d.status === "tool_summary" && d.summary) setActivity(d.summary);
-    });
+      case "assistant":
+        if (!liveBubble) liveBubble = startMessage("assistant");
+        appendText(liveBubble, data.content);
+        scrollDown();
+        break;
 
-    stream.addEventListener("permission_request", function (ev) {
-      pendingPerms++;
-      setActivity("Waiting for your approval\\u2026");
-      renderPermission(JSON.parse(ev.data));
-    });
+      case "tool_use":
+        if (!liveBubble) liveBubble = startMessage("assistant");
+        appendTool(liveBubble, data.tool_name, data.tool_input);
+        break;
 
-    stream.addEventListener("error", function (ev) {
-      // Fires for an agent error (has data) and for a transport drop (none).
-      // EventSource retries drops itself, so only give up once it is closed.
-      if (ev.data) {
-        try { showError(new Error(JSON.parse(ev.data).message)); }
-        catch (e) { showError(new Error("Stream error")); }
+      case "status":
+        if (state === "aborting") break;
+        if (data.status === "thinking") setActivity("Thinking\u2026");
+        else if (data.status === "tool") setActivity("Running " + (data.tool_name || "tool") + "\u2026");
+        else if (data.status === "tool_summary" && data.summary) setActivity(data.summary);
+        break;
+
+      case "permission_request":
+        if (replay && pendingFilter && pendingFilter.indexOf(data.toolUseID) === -1) break;
+        pendingPerms++;
+        setActivity("Waiting for your approval\u2026");
+        renderPermission(data);
+        break;
+
+      case "aborted":
+        $("messages-inner").appendChild(el("div", "note", "Stopped."));
+        scrollDown();
         finishTurn();
-        return;
-      }
-      if (!stream || stream.readyState === 2) { setActivity("Connection lost"); finishTurn(); }
-      else setActivity("Reconnecting\\u2026");
-    });
+        break;
 
-    stream.addEventListener("aborted", function () {
-      $("messages-inner").appendChild(el("div", "note", "Stopped."));
-      scrollDown();
-      finishTurn();
-    });
+      case "done":
+        finishTurn();
+        break;
 
-    stream.addEventListener("done", finishTurn);
-    stream.addEventListener("result", function () { /* turn summary */ });
+      case "error":
+        // Fires for an agent error (has data) and for a transport drop (none).
+        // EventSource retries drops itself, so only give up once it is closed.
+        if (ev && ev.data) {
+          showError(new Error(data.message || "Stream error"));
+          finishTurn();
+        } else if (!stream || stream.readyState === 2) {
+          setActivity("Connection lost");
+          finishTurn();
+        } else {
+          setActivity("Reconnecting\u2026");
+        }
+        break;
+    }
   }
 
   function renderPermission(data) {
@@ -745,7 +1069,7 @@ export const html = `<!DOCTYPE html>
         .then(function () {
           card.replaceWith(el("div", "note", (ok ? "Allowed " : "Denied ") + data.toolName));
           pendingPerms = Math.max(0, pendingPerms - 1);
-          if (!pendingPerms && state === "running") setActivity("Thinking\\u2026");
+          if (!pendingPerms && state === "running") setActivity("Thinking\u2026");
         })
         .catch(showError);
     }
@@ -762,7 +1086,8 @@ export const html = `<!DOCTYPE html>
     closeStream();
     liveBubble = null;
     pendingPerms = 0;
-    runningThreadId = null;
+    if (streamThreadId) delete live[streamThreadId];
+    streamThreadId = null;
     var keep = $("activity").textContent === "Connection lost";
     setState("idle");
     if (!keep) setActivity("");
@@ -770,6 +1095,18 @@ export const html = `<!DOCTYPE html>
   }
 
   function closeStream() { if (stream) { stream.close(); stream = null; } }
+
+  /** Drops turns that finished while we were not watching, so a thread does not
+   *  keep claiming to be running forever. */
+  function pruneLive() {
+    var ids = Object.keys(live);
+    if (!ids.length) return Promise.resolve();
+    return Promise.all(ids.map(function (threadId) {
+      return api("/sessions/" + encodeURIComponent(live[threadId]) + "/status")
+        .then(function (d) { if (!d.streaming) delete live[threadId]; })
+        .catch(function () { delete live[threadId]; });
+    }));
+  }
 
   /** Leaves a running turn alone server-side, but stops following it here. */
   function detach() {
@@ -800,6 +1137,219 @@ export const html = `<!DOCTYPE html>
       box.appendChild(el("div", "spinner"));
     }
     box.appendChild(el("span", null, text));
+  }
+
+  // --- Sharing ---
+  // A bot is portable: everything that defines its behaviour travels, and
+  // nothing that is local to one machine does. repoPath is deliberately left
+  // behind — the folder a bot works in is the receiver's to choose.
+  var SHARE_PREFIX = "grassbot:v1:";
+  var SHARE_FIELDS = ["name", "emoji", "description", "instructions", "model",
+                      "permissionMode", "allowedTools", "disallowedTools"];
+
+  function toB64(str) {
+    var bytes = new TextEncoder().encode(str);
+    var bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    var out = btoa(bin).split("+").join("-").split("/").join("_");
+    while (out.charAt(out.length - 1) === "=") out = out.slice(0, -1);
+    return out;
+  }
+
+  function fromB64(str) {
+    var b = str.split("-").join("+").split("_").join("/");
+    while (b.length % 4) b += "=";
+    var bin = atob(b);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  function shareCode(bot) {
+    var payload = {};
+    SHARE_FIELDS.forEach(function (k) {
+      if (bot[k] !== undefined && bot[k] !== null && bot[k] !== "") payload[k] = bot[k];
+    });
+    return SHARE_PREFIX + toB64(JSON.stringify(payload));
+  }
+
+  /** Accepts a share code or the bare JSON inside one. Returns null if neither. */
+  function parseShare(text) {
+    var raw = String(text || "").trim();
+    if (!raw) return null;
+    var json = raw;
+    var at = raw.indexOf(SHARE_PREFIX);
+    if (at !== -1) {
+      // Tolerate a code that picked up quotes or a wrapping sentence in transit.
+      var code = raw.slice(at + SHARE_PREFIX.length).split(/[^A-Za-z0-9_-]/)[0];
+      try { json = fromB64(code); } catch (e) { return null; }
+    }
+    var obj;
+    try { obj = JSON.parse(json); } catch (e) { return null; }
+    if (!obj || typeof obj !== "object" || typeof obj.name !== "string" || !obj.name.trim()) return null;
+
+    // Only known fields cross the boundary, each checked for its own shape.
+    var bot = { name: obj.name.trim() };
+    ["emoji", "description", "instructions", "model"].forEach(function (k) {
+      if (typeof obj[k] === "string") bot[k] = obj[k];
+    });
+    if (["ask-permissions", "auto-approve", "plan"].indexOf(obj.permissionMode) !== -1) {
+      bot.permissionMode = obj.permissionMode;
+    }
+    ["allowedTools", "disallowedTools"].forEach(function (k) {
+      if (Array.isArray(obj[k])) {
+        var tools = obj[k].filter(function (t) { return typeof t === "string" && t.trim(); });
+        if (tools.length) bot[k] = tools;
+      }
+    });
+    return bot;
+  }
+
+  function toast(text) {
+    var old = document.querySelector(".toast");
+    if (old) old.remove();
+    var t = el("div", "toast", text);
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 2400);
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // execCommand is the only route on a plain-http origin, which is the
+    // common case when the CLI is reached over a LAN address.
+    return new Promise(function (resolve, reject) {
+      var ta = el("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      ta.remove();
+      ok ? resolve() : reject(new Error("copy blocked"));
+    });
+  }
+
+  function shareBot(bot) {
+    var code = shareCode(bot);
+    copyText(code)
+      .then(function () { toast("Copied " + bot.name + " to the clipboard"); })
+      .catch(function () { openShareModal(bot, code); });
+  }
+
+  /** Shown only when the clipboard is unavailable: the code, ready to copy by hand. */
+  function openShareModal(bot, code) {
+    var parts = modalShell("Share " + bot.name);
+    parts.modal.appendChild(el("p", "picker-note", "Copying was blocked by the browser. Copy this code and paste it into another grass."));
+    var box = el("textarea", "code");
+    box.value = code;
+    box.readOnly = true;
+    parts.modal.appendChild(box);
+    var acts = el("div", "acts");
+    acts.appendChild(el("div", "spacer"));
+    var done = el("button", "btn primary", "Done");
+    done.onclick = parts.close;
+    acts.appendChild(done);
+    parts.modal.appendChild(acts);
+    parts.open();
+    box.focus();
+    box.select();
+  }
+
+  function openImportModal() {
+    var parts = modalShell("Import a bot");
+    var field = el("div", "field");
+    var lab = el("label", null, "Share code");
+    lab.appendChild(el("span", "hint", "  paste what someone shared with you"));
+    field.appendChild(lab);
+    var box = el("textarea", "code");
+    box.placeholder = SHARE_PREFIX + "…";
+    field.appendChild(box);
+    parts.modal.appendChild(field);
+
+    var preview = el("div", "preview");
+    preview.style.display = "none";
+    parts.modal.appendChild(preview);
+
+    var add = el("button", "btn primary", "Add bot");
+    add.disabled = true;
+    var parsed = null;
+
+    function review() {
+      parsed = parseShare(box.value);
+      preview.innerHTML = "";
+      if (!box.value.trim()) {
+        preview.style.display = "none";
+        add.disabled = true;
+        return;
+      }
+      preview.style.display = "";
+      if (!parsed) {
+        preview.appendChild(el("div", "bad", "That does not look like a bot share code."));
+        add.disabled = true;
+        return;
+      }
+      preview.appendChild(avatar(parsed));
+      var body = el("div");
+      body.appendChild(el("div", "nm", parsed.name));
+      body.appendChild(el("div", "ds", parsed.description || "No description."));
+      preview.appendChild(body);
+      add.disabled = false;
+    }
+
+    box.addEventListener("input", review);
+    box.addEventListener("paste", function () { setTimeout(review, 0); });
+
+    add.onclick = function () {
+      if (!parsed) return;
+      add.disabled = true;
+      api("/bots", { method: "POST", body: parsed })
+        .then(function (d) {
+          parts.close();
+          return loadRoster().then(function () { openBot(d.bot); });
+        })
+        .catch(function (err) {
+          add.disabled = false;
+          preview.innerHTML = "";
+          preview.style.display = "";
+          preview.appendChild(el("div", "bad", err && err.message ? err.message : String(err)));
+        });
+    };
+
+    var acts = el("div", "acts");
+    acts.appendChild(el("div", "spacer"));
+    var cancel = el("button", "btn", "Cancel");
+    cancel.onclick = parts.close;
+    acts.appendChild(cancel);
+    acts.appendChild(add);
+    parts.modal.appendChild(acts);
+    parts.open();
+    box.focus();
+  }
+
+  /** Backdrop, escape key and dismissal, shared by the small modals. */
+  function modalShell(title) {
+    var backdrop = el("div", "backdrop");
+    var modal = el("div", "modal");
+    modal.appendChild(el("h2", null, title));
+    backdrop.appendChild(modal);
+    function close() {
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+    }
+    function esc(ev) { if (ev.key === "Escape") close(); }
+    backdrop.onclick = function (ev) { if (ev.target === backdrop) close(); };
+    return {
+      modal: modal,
+      close: close,
+      open: function () {
+        document.addEventListener("keydown", esc);
+        document.body.appendChild(backdrop);
+      }
+    };
   }
 
   // --- Bot editor ---
@@ -916,6 +1466,8 @@ export const html = `<!DOCTYPE html>
 
   // --- Wiring ---
   $("new-bot").onclick = function () { openBotModal(null); };
+  $("import-bot").onclick = openImportModal;
+  $("share-bot").onclick = function () { if (activeBot) shareBot(activeBot); };
   $("edit-bot").onclick = function () { if (activeBot) openBotModal(activeBot); };
   $("new-thread").onclick = newThread;
   $("to-home").onclick = function () { goHome(); };

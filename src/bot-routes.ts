@@ -19,6 +19,7 @@ import {
   deleteThread,
   type Bot,
 } from "./bot-store";
+import { existsSync, statSync } from "fs";
 import { loadTranscript } from "./start-claude-code";
 
 /**
@@ -89,7 +90,13 @@ export async function handleBotRoutes(
       const body = await readBody(req);
       const bot = body.botId ? getBot(body.botId) : undefined;
       if (!bot) { jsonError(res, 400, "a valid botId is required"); return true; }
+      // A thread runs where it is told to: the folder the user picked, else the
+      // bot's default, else the directory the CLI was started in.
       const repoPath = body.repoPath ?? bot.repoPath ?? workspaceCwd;
+      if (!existsSync(repoPath) || !statSync(repoPath).isDirectory()) {
+        jsonError(res, 400, `Not a directory: ${repoPath}`);
+        return true;
+      }
       jsonOk(res, { thread: createThread(bot.id, repoPath, body.title) });
       return true;
     }

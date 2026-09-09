@@ -6,7 +6,7 @@ import http from "node:http";
 import { EventEmitter } from "events";
 import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
-import { listRepos, cloneRepo, createFolder, listDir, readFile, getRepoDetails } from "./workspace";
+import { listRepos, cloneRepo, createFolder, listDir, readFile, getRepoDetails, browseDirs } from "./workspace";
 
 // --- Transport abstractions ---
 // These interfaces cover the exact surface area that route handlers use.
@@ -636,6 +636,17 @@ export async function handleWorkspaceRoutes(
       jsonOk(res, { path: createdPath, name: basename(createdPath) });
     } catch (err: any) {
       jsonError(res, 500, err?.message ?? "Create failed");
+    }
+    return true;
+  }
+
+  // GET /browse?path= — subdirectories only, for the folder picker. Defaults to
+  // the workspace, but roams the whole filesystem from there.
+  if (method === "GET" && path === "/browse") {
+    try {
+      jsonOk(res, await browseDirs(query.path ?? workspaceCwd, workspaceCwd));
+    } catch (err: any) {
+      jsonError(res, 400, err?.message ?? "Failed to browse directory");
     }
     return true;
   }
