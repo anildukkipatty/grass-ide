@@ -15,7 +15,7 @@ import {
   shouldAutoApprove,
   type SessionStore,
 } from "./server-common";
-import { bindSession } from "./bot-store";
+import { bindSession, setSetupStatus } from "./bot-store";
 
 export async function initAgent(): Promise<boolean> {
   try {
@@ -66,7 +66,11 @@ export async function runAgent(store: SessionStore): Promise<void> {
     // A bot is a preset: its instructions ride on top of Claude Code's own system
     // prompt, and its tool lists constrain the run.
     const preset = store.botPreset;
-    const append = preset?.instructions ? botSystemPrompt(preset) : undefined;
+    const append = preset?.setup
+      ? setupSystemPrompt(preset)
+      : preset?.instructions
+        ? botSystemPrompt(preset)
+        : undefined;
 
     const q = query({
       prompt: promptParam,
@@ -112,6 +116,8 @@ export async function runAgent(store: SessionStore): Promise<void> {
     });
 
     let receivedResult = false;
+    // A setup run says how it went in words; the marker is what the hub reads.
+    let assistantText = "";
     try {
       for await (const msg of q) {
         if (msg.type === "system" && msg.subtype === "init") {
@@ -127,6 +133,12 @@ export async function runAgent(store: SessionStore): Promise<void> {
 
         if (!modelLogged && msg.type === "assistant" && (msg as any).message?.model) {
           modelLogged = true;
+        }
+
+        if (preset?.setup && msg.type === "assistant") {
+          for (const block of (msg as any).message?.content ?? []) {
+            if (block?.type === "text" && block.text) assistantText += block.text + "\n";
+          }
         }
 
         const payload = formatMessage(msg);
@@ -145,6 +157,8 @@ export async function runAgent(store: SessionStore): Promise<void> {
         throw err;
       }
     }
+
+    if (preset?.setup) recordSetupOutcome(preset.id, assistantText);
 
     if (!receivedResult) {
       console.log("[query] stream ended without result message — treating as error");
@@ -203,6 +217,59 @@ function botSystemPrompt(preset: NonNullable<SessionStore["botPreset"]>): string
     "job above is the request. Afterwards, follow the user's messages as usual,",
     "keeping the job's constraints in force for the rest of the conversation.",
   ].join("\n");
+}
+
+/**
+ * Frames the one-time machine-preparation run. The bot's own job is context
+ * here, not the task: the task is making this computer able to do that job.
+ * The run stays an ordinary conversation afterwards, so the user can take over
+ * when a step needs a human — a password, a licence, a choice of package manager.
+ */
+function setupSystemPrompt(preset: NonNullable<SessionStore["botPreset"]>): string {
+  return [
+    `You are setting up the machine for "${preset.name}", a bot that has just been`,
+    "installed here. This thread is the one-time setup run, not the bot's work.",
+    "",
+    ...(preset.instructions.trim()
+      ? ["THE JOB THIS MACHINE IS BEING PREPARED FOR (context only — do not do it now):",
+         preset.instructions.trim(), ""]
+      : []),
+    "SETUP INSTRUCTIONS FROM THE BOT'S AUTHOR:",
+    (preset.setupInstructions ?? "").trim(),
+    "",
+    "HOW TO RUN THIS:",
+    "Begin as soon as the user's first message arrives, whatever it says. Check what",
+    "is already present before installing anything — a machine that is ready needs no",
+    "changes. Prefer the platform's usual package manager, keep changes to what the",
+    "instructions call for, and explain anything that touches system state before you",
+    "do it. If a step needs the user — a password, a licence key, an account, a choice",
+    "you cannot make for them — ask in this thread and wait; this is a normal",
+    "conversation and they can answer.",
+    "",
+    "HOW TO FINISH:",
+    "When the machine can do the job, verify it (run the tool, check the version),",
+    "then end your final message with a line containing exactly:",
+    "SETUP_COMPLETE",
+    "If you cannot get there — a missing dependency you may not install, an",
+    "unsupported platform, a step the user must do elsewhere — end your final message",
+    "with a line of the form:",
+    "SETUP_FAILED: <one line saying what is blocked>",
+    "Write one of those two markers only when the run has actually reached that",
+    "point; never write them while a step is still outstanding, and never mention",
+    "them as an example. The user may keep talking to you afterwards, and a later",
+    "turn may end with a marker of its own once the situation changes.",
+  ].join("\n");
+}
+
+/**
+ * Reads the run's verdict off the end of the transcript. The last marker wins,
+ * so a later turn that fixes a failure can flip the bot to ready.
+ */
+function recordSetupOutcome(botId: string, text: string): void {
+  const matches = text.match(/^\s*SETUP_(COMPLETE|FAILED)\b/gm);
+  if (!matches?.length) return;
+  const done = /COMPLETE/.test(matches[matches.length - 1]);
+  setSetupStatus(botId, done ? "complete" : "failed");
 }
 
 function formatMessage(

@@ -157,26 +157,92 @@ export const html = `<!DOCTYPE html>
   @media (prefers-reduced-motion: reduce) { .dot.live::before { animation: none; } }
 
   /* --- Bot page --- */
+
+  /* Identity lives in the bar: name, a status dot, and the instructions as one
+     clamped line. The page below belongs to the threads. */
+  .name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .name-row h2 { min-width: 0; }
+  .ready { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+  .ready.pending { background: var(--accent); }
+  .ready.failed { background: var(--danger); }
+
+  .brief-line {
+    display: flex; align-items: center; gap: 6px; max-width: 100%;
+    background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+    color: var(--muted); font-size: 12.5px;
+  }
+  .brief-line > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brief-line:hover { color: var(--text); }
+  .brief-line .chev-d { flex: none; font-size: 10px; transition: transform .15s ease; }
+  .brief-line.open .chev-d { transform: rotate(180deg); }
+
+  .btn.icon { padding: 6px 9px; font-size: 16px; line-height: 1; }
+
+  .menu {
+    position: fixed; z-index: 30; min-width: 170px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.14)); padding: 5px;
+  }
+  .menu button {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    padding: 8px 10px; border-radius: 7px; font: inherit; color: var(--text); cursor: pointer;
+  }
+  .menu button:hover { background: var(--surface-2); }
+
   .brief {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 16px 18px; margin: 22px 0 26px; box-shadow: var(--shadow-sm);
+    padding: 14px 16px; margin: 18px 0 0; box-shadow: var(--shadow-sm);
     border-left: 3px solid hsl(var(--bot-hue) 60% 55%);
   }
   .brief .label { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); font-weight: 650; margin-bottom: 6px; }
   .brief p { margin: 0; color: var(--text); white-space: pre-wrap; }
   .brief p.none { color: var(--faint); font-style: italic; }
 
-  .section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-  .section-head h3 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); flex: 1; }
+  /* The setup notice sits above the brief: until it clears, it is the page. */
+  .setup {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 18px; margin: 22px 0 0; box-shadow: var(--shadow-sm);
+    border-left: 3px solid var(--accent);
+    display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap;
+  }
+  .setup.failed { border-left-color: var(--danger); }
+  .setup.done { border-left-color: var(--ok); }
+  .setup .txt { flex: 1; min-width: 220px; }
+  .setup .hd { font-weight: 650; margin-bottom: 4px; }
+  .setup.failed .hd { color: var(--danger); }
+  .setup p { margin: 0; color: var(--muted); font-size: 13.5px; white-space: pre-wrap; }
+  .setup .acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-  .threads { display: flex; flex-direction: column; gap: 8px; padding-bottom: 60px; }
+  .tag {
+    font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; font-weight: 650;
+    color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 999px; padding: 1px 7px; margin-left: 8px; vertical-align: 1px;
+  }
+  .tag.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+  .tag.failed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+
+  .section-head { display: flex; align-items: center; gap: 12px; margin: 22px 0 10px; }
+  .section-head h3 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .section-path {
+    flex: 1; min-width: 0; font-size: 11.5px; color: var(--faint);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr;
+  }
+
+  /* Rows read as one list: shared border, hairline dividers, no per-row card. */
+  .threads {
+    display: flex; flex-direction: column; margin-bottom: 60px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow-sm); overflow: hidden;
+  }
+  .threads:empty { display: none; }
   .thread {
     position: relative; display: flex; align-items: center; gap: 14px; text-align: left; width: 100%;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 13px;
-    padding: 14px 16px; box-shadow: var(--shadow-sm);
-    transition: border-color .14s ease, transform .14s ease;
+    background: none; border: 0; border-top: 1px solid var(--border);
+    padding: 13px 16px; transition: background .12s ease;
   }
-  .thread:hover { border-color: hsl(var(--bot-hue) 50% 62%); transform: translateX(2px); }
+  .thread:first-child { border-top: 0; }
+  .thread:hover { background: var(--surface-2); }
   .thread .body { flex: 1; min-width: 0; }
   .thread .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thread .prev { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
@@ -255,6 +321,7 @@ export const html = `<!DOCTYPE html>
     display: flex; align-items: center; justify-content: center;
   }
   .send:disabled { opacity: .35; cursor: default; }
+  .btn:disabled { opacity: .45; cursor: default; }
   .send.stop { background: var(--danger); }
   .send.stop::before { content: ""; width: 11px; height: 11px; border-radius: 2px; background: currentColor; }
 
@@ -354,21 +421,30 @@ export const html = `<!DOCTYPE html>
   <div class="bar"><div class="wrap bar-inner">
     <button class="back" id="to-home"><span class="chev">&lsaquo;</span> Bots</button>
     <div class="avatar sm" id="bot-avatar"></div>
-    <div class="bar-title"><h2 id="bot-name"></h2></div>
+    <div class="bar-title">
+      <div class="name-row">
+        <h2 id="bot-name"></h2>
+        <span class="ready" id="bot-ready" hidden></span>
+      </div>
+      <button class="brief-line" id="brief-line" type="button" hidden>
+        <span id="brief-line-text"></span><span class="chev-d">&#9662;</span>
+      </button>
+    </div>
     <button class="btn ghost" id="share-bot">Share</button>
     <button class="btn ghost" id="edit-bot">Edit</button>
+    <button class="btn ghost icon" id="bot-more" title="More" aria-label="More">&#8943;</button>
   </div></div>
   <div class="scroll"><div class="wrap">
-    <div class="brief" id="brief">
-      <div class="label">Instructions</div>
-      <p id="brief-text"></p>
-    </div>
+    <div class="brief" id="brief" hidden><p id="brief-text"></p></div>
+    <div id="setup-banner"></div>
     <div class="section-head">
       <h3>Threads</h3>
-      <button class="btn" id="new-thread">+ New thread</button>
+      <span class="section-path" id="threads-path"></span>
+      <button class="btn primary" id="new-thread">+ New thread</button>
     </div>
     <div class="threads" id="threads"></div>
   </div></div>
+  <div class="menu" id="bot-menu" hidden></div>
 </section>
 
 <!-- One thread -->
@@ -436,7 +512,11 @@ export const html = `<!DOCTYPE html>
     }
     return fetch(path, init).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
-        if (!r.ok) throw new Error(d.error || ("Request failed: " + r.status));
+        if (!r.ok) {
+          var err = new Error(d.error || ("Request failed: " + r.status));
+          err.data = d;   // some errors are acted on, not just shown
+          throw err;
+        }
         return d;
       });
     });
@@ -595,9 +675,16 @@ export const html = `<!DOCTYPE html>
     av.textContent = bot.emoji || "\\u{1F916}";
     tint(av, bot);
     tint($("brief"), bot);
+    var text = bot.instructions || "No instructions \\u2014 this bot behaves like plain Claude Code.";
     var brief = $("brief-text");
-    brief.textContent = bot.instructions || "No instructions \\u2014 this bot behaves like plain Claude Code.";
+    brief.textContent = text;
     brief.className = bot.instructions ? "" : "none";
+    // The instructions are the bot's identity, not the page's content: one line
+    // under the name, opened only when someone asks for the rest.
+    $("brief-line-text").textContent = text.split("\\n")[0];
+    $("brief-line").hidden = false;
+    setBriefOpen(false);
+    renderSetup();
     setView("bot");
     return loadThreads();
   }
@@ -621,33 +708,166 @@ export const html = `<!DOCTYPE html>
         }
       }
       renderThreads();
+      renderSetup();
+      // A setup run reports its verdict on the bot, not the thread, so pick the
+      // bot up again while the machine is still unprepared.
+      if (needsSetup(activeBot)) {
+        var id = activeBot.id;
+        var was = activeBot.setupStatus;
+        return api("/bots/" + id).then(function (r) {
+          if (!activeBot || activeBot.id !== id) return;
+          replaceBot(r.bot);
+          renderSetup();
+          renderThreads();
+          // The run says how it went in the thread; say it once out here too,
+          // since the verdict is what unblocks the rest of the bot.
+          var now = r.bot.setupStatus;
+          if (now !== was && now === "complete") toast(r.bot.name + " is set up on this machine");
+          else if (now !== was && now === "failed") toast("Setup did not finish \u2014 open the setup thread");
+        }).catch(function () {});
+      }
+    });
+  }
+
+  // --- Setup ---
+  // A bot may declare what it needs from a machine. Until this machine has it,
+  // the bot has exactly one thread it is allowed to run: the setup thread.
+
+  var SETUP_PROMPT = "Start setup.";
+
+  function needsSetup(bot) {
+    return !!(bot && bot.setupInstructions && bot.setupStatus !== "complete");
+  }
+
+  function setupThreadOf() {
+    for (var i = 0; i < threads.length; i++) if (threads[i].kind === "setup") return threads[i];
+    return null;
+  }
+
+  /** Keeps the roster's copy of a bot in step with one the server just returned. */
+  function replaceBot(bot) {
+    if (!bot) return;
+    if (activeBot && activeBot.id === bot.id) activeBot = bot;
+    for (var i = 0; i < bots.length; i++) if (bots[i].id === bot.id) { bots[i] = bot; break; }
+  }
+
+  function renderSetup() {
+    var box = $("setup-banner");
+    box.innerHTML = "";
+    var bot = activeBot;
+    $("new-thread").disabled = needsSetup(bot);
+    $("bot-more").hidden = !(bot && bot.setupInstructions);
+    if (!bot || !bot.setupInstructions) { $("bot-ready").hidden = true; return; }
+
+    var status = bot.setupStatus || "pending";
+    // A ready machine is the steady state, so it says so with a dot in the bar
+    // and gets out of the way. Only pending and failed earn a banner.
+    var dot = $("bot-ready");
+    dot.hidden = false;
+    dot.className = "ready" + (status === "complete" ? "" : status === "failed" ? " failed" : " pending");
+    dot.title = status === "complete" ? "Ready on this machine"
+      : status === "failed" ? "Setup did not finish" : "Setup needed on this machine";
+    if (status === "complete") return;
+
+    var wrap = el("div", "setup" + (status === "failed" ? " failed" : ""));
+    var txt = el("div", "txt");
+    if (status === "failed") {
+      txt.appendChild(el("div", "hd", "Setup did not finish"));
+      txt.appendChild(el("p", null, "Open the setup thread to see what stopped it \u2014 it is an ordinary conversation, so you can answer it and carry on."));
+    } else {
+      txt.appendChild(el("div", "hd", "Setup needed on this machine"));
+      txt.appendChild(el("p", null, bot.name + " needs this machine prepared before it can take work. New threads open once setup is done."));
+    }
+    wrap.appendChild(txt);
+
+    var acts = el("div", "acts");
+    var t = setupThreadOf();
+    var open = el("button", "btn primary", t && t.messageCount ? "Open setup" : "Run setup");
+    open.onclick = function () { openSetup(); };
+    acts.appendChild(open);
+    var mark = el("button", "btn", "Mark as done");
+    mark.title = "Use this if you sorted it out yourself";
+    mark.onclick = function () { setupAction("complete"); };
+    acts.appendChild(mark);
+    wrap.appendChild(acts);
+    box.appendChild(wrap);
+  }
+
+  function setupAction(action) {
+    if (!activeBot) return Promise.resolve();
+    return api("/bots/" + activeBot.id + "/setup", { method: "POST", body: { action: action } })
+      .then(function (d) { replaceBot(d.bot); return loadThreads(); })
+      .catch(function (err) { toast(err && err.message ? err.message : String(err)); });
+  }
+
+  /** Opens the setup thread, making one first if it is missing. */
+  function openSetup() {
+    if (!activeBot || !activeBot.setupInstructions) return Promise.resolve();
+    var t = setupThreadOf();
+    if (t) return openThread(t).then(function () { autoStartSetup(t); });
+    return setupAction("reset").then(function () {
+      var fresh = setupThreadOf();
+      if (!fresh) return;
+      return openThread(fresh).then(function () { autoStartSetup(fresh); });
+    });
+  }
+
+  /**
+   * The opening message of a setup run is written and sent for the user: the
+   * bot's author already said what has to happen, so there is nothing to type.
+   * Everything after it is an ordinary conversation.
+   */
+  function autoStartSetup(thread) {
+    if (!thread || thread.messageCount || live[thread.id] || state !== "idle") return;
+    sendText(SETUP_PROMPT);
+  }
+
+  /** Called right after a bot lands here, whether it was created or imported. */
+  function afterBotAdded(bot) {
+    return openBot(bot).then(function () {
+      if (needsSetup(bot)) return openSetup();
     });
   }
 
   function renderThreads() {
     var list = $("threads");
     list.innerHTML = "";
+    $("threads-path").textContent = "";
     if (!activeBot) return;
 
     if (!threads.length) {
       var e = el("div", "empty");
       e.appendChild(el("h3", null, "No threads yet"));
       e.appendChild(el("p", null, "Every conversation with " + activeBot.name + " lives in its own thread, and each one keeps its history."));
-      var cta = el("button", "btn primary", "Start the first thread");
-      cta.onclick = newThread;
+      var blocked = needsSetup(activeBot);
+      var cta = el("button", "btn primary", blocked ? "Run setup first" : "Start the first thread");
+      cta.onclick = blocked ? function () { openSetup(); } : newThread;
       e.appendChild(cta);
       list.appendChild(e);
       return;
     }
 
+    // Nearly every thread runs in the same folder, so the path is stated once
+    // above the list; a row only carries a chip when it broke from the pack.
+    var base = commonPath();
+    $("threads-path").textContent = base ? shortPath(base, 40) : "";
+    $("threads-path").title = base || "";
+
     threads.forEach(function (t) {
       var row = tint(el("div", "thread"), activeBot);
       var body = el("div", "body");
-      body.appendChild(el("div", "title", t.title));
+      var title = el("div", "title", t.title);
+      if (t.kind === "setup") {
+        var st = activeBot.setupStatus || "pending";
+        title.appendChild(el("span", "tag" + (st === "complete" ? " done" : st === "failed" ? " failed" : ""), "setup"));
+      }
+      body.appendChild(title);
       body.appendChild(el("div", "prev", t.preview || "No messages yet"));
-      var where = el("div", "path", shortPath(t.repoPath));
-      where.title = t.repoPath || "";
-      body.appendChild(where);
+      if ((t.repoPath || "") !== base) {
+        var where = el("div", "path", shortPath(t.repoPath));
+        where.title = t.repoPath || "";
+        body.appendChild(where);
+      }
       row.appendChild(body);
 
       var meta = el("div", "meta");
@@ -669,14 +889,59 @@ export const html = `<!DOCTYPE html>
     });
   }
 
+  /** The folder most of this bot's threads run in \u2014 the list's implied home. */
+  function commonPath() {
+    var counts = {}, best = null, bestN = 0;
+    threads.forEach(function (t) {
+      var key = t.repoPath || "";
+      counts[key] = (counts[key] || 0) + 1;
+      if (counts[key] > bestN) { bestN = counts[key]; best = key; }
+    });
+    return best;
+  }
+
+  function setBriefOpen(open) {
+    $("brief").hidden = !open;
+    $("brief-line").classList.toggle("open", open);
+  }
+
+  /** The rare, machine-level actions live behind the bar's overflow, not in it. */
+  function openBotMenu() {
+    var menu = $("bot-menu");
+    menu.innerHTML = "";
+    if (!activeBot) return;
+    var again = el("button", null, "Run setup again");
+    again.onclick = function () { closeBotMenu(); setupAction("reset").then(openSetup); };
+    menu.appendChild(again);
+    var r = $("bot-more").getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.top = (r.bottom + 6) + "px";
+    menu.style.left = Math.max(8, r.right - menu.offsetWidth) + "px";
+  }
+
+  function closeBotMenu() { $("bot-menu").hidden = true; }
+
   function newThread() {
     if (!activeBot) return;
+    if (needsSetup(activeBot)) {
+      toast("Set up " + activeBot.name + " on this machine first");
+      openSetup();
+      return;
+    }
     // A thread is pinned to a folder for its whole life, so the folder is
     // chosen up front rather than argued about later.
     openFolderPicker(activeBot.repoPath || null, function (repoPath) {
       api("/threads", { method: "POST", body: { botId: activeBot.id, repoPath: repoPath || undefined } })
         .then(function (d) { return loadThreads().then(function () { openThread(d.thread); }); })
-        .catch(showError);
+        .catch(function (err) {
+          // The server has the last word on whether setup is done.
+          if (err && err.data && err.data.setupRequired) {
+            toast(err.message);
+            loadThreads().then(function () { openSetup(); });
+            return;
+          }
+          toast(err && err.message ? err.message : String(err));
+        });
     });
   }
 
@@ -881,10 +1146,15 @@ export const html = `<!DOCTYPE html>
   function send() {
     var input = $("input");
     var text = input.value.trim();
-    if (!text || !activeThread || state !== "idle") return;
-
+    if (!text) return;
     input.value = "";
     input.style.height = "auto";
+    sendText(text);
+  }
+
+  /** Sends a turn on the open thread. The setup run uses this with a written prompt. */
+  function sendText(text) {
+    if (!text || !activeThread || state !== "idle") return;
     appendText(startMessage("user"), text);
     setState("starting");
     setActivity("Sending\u2026");
@@ -1144,8 +1414,10 @@ export const html = `<!DOCTYPE html>
   // nothing that is local to one machine does. repoPath is deliberately left
   // behind — the folder a bot works in is the receiver's to choose.
   var SHARE_PREFIX = "grassbot:v1:";
-  var SHARE_FIELDS = ["name", "emoji", "description", "instructions", "model",
-                      "permissionMode", "allowedTools", "disallowedTools"];
+  // setupStatus and setupThreadId stay behind with repoPath: they describe this
+  // machine, not the bot. The receiving machine works out its own.
+  var SHARE_FIELDS = ["name", "emoji", "description", "instructions", "setupInstructions",
+                      "model", "permissionMode", "allowedTools", "disallowedTools"];
 
   function toB64(str) {
     var bytes = new TextEncoder().encode(str);
@@ -1190,7 +1462,7 @@ export const html = `<!DOCTYPE html>
 
     // Only known fields cross the boundary, each checked for its own shape.
     var bot = { name: obj.name.trim() };
-    ["emoji", "description", "instructions", "model"].forEach(function (k) {
+    ["emoji", "description", "instructions", "setupInstructions", "model"].forEach(function (k) {
       if (typeof obj[k] === "string") bot[k] = obj[k];
     });
     if (["ask-permissions", "auto-approve", "plan"].indexOf(obj.permissionMode) !== -1) {
@@ -1296,6 +1568,9 @@ export const html = `<!DOCTYPE html>
       var body = el("div");
       body.appendChild(el("div", "nm", parsed.name));
       body.appendChild(el("div", "ds", parsed.description || "No description."));
+      if (parsed.setupInstructions) {
+        body.appendChild(el("div", "ds", "Needs setup on this machine \u2014 a setup thread starts when you add it."));
+      }
       preview.appendChild(body);
       add.disabled = false;
     }
@@ -1309,7 +1584,7 @@ export const html = `<!DOCTYPE html>
       api("/bots", { method: "POST", body: parsed })
         .then(function (d) {
           parts.close();
-          return loadRoster().then(function () { openBot(d.bot); });
+          return loadRoster().then(function () { return afterBotAdded(d.bot); });
         })
         .catch(function (err) {
           add.disabled = false;
@@ -1387,6 +1662,10 @@ export const html = `<!DOCTYPE html>
     instructions.value = bot ? bot.instructions : "";
     instructions.placeholder = "You keep documentation in sync with the code. On each run, read the latest commit and update the docs it affects.";
 
+    var setupInstructions = field("Setup instructions", "run once per machine \u2014 blank means no setup", el("textarea"));
+    setupInstructions.value = bot ? (bot.setupInstructions || "") : "";
+    setupInstructions.placeholder = "This bot needs ffmpeg on PATH. Check for it and install it with the machine's package manager if it is missing.";
+
     var repoPath = field("Working directory", "default for new threads", el("input"));
     repoPath.value = bot ? (bot.repoPath || "") : "";
     repoPath.placeholder = "blank uses the server's directory";
@@ -1431,6 +1710,7 @@ export const html = `<!DOCTYPE html>
         emoji: emoji.value.trim() || "\\u{1F916}",
         description: description.value.trim(),
         instructions: instructions.value,
+        setupInstructions: setupInstructions.value.trim() || undefined,
         repoPath: repoPath.value.trim() || undefined,
         model: model.value.trim() || undefined,
         permissionMode: permissionMode.value,
@@ -1446,8 +1726,11 @@ export const html = `<!DOCTYPE html>
           return api("/bots");
         }).then(function (r) {
           bots = r.bots || [];
-          if (editing) { openBot(d.bot); }
-          else { renderRoster(); openBot(d.bot); }
+          // A new bot may owe this machine a setup run; an edit just goes back
+          // to the bot's page.
+          if (editing) return openBot(d.bot);
+          renderRoster();
+          return afterBotAdded(d.bot);
         });
       }).catch(showError);
     };
@@ -1467,6 +1750,13 @@ export const html = `<!DOCTYPE html>
   // --- Wiring ---
   $("new-bot").onclick = function () { openBotModal(null); };
   $("import-bot").onclick = openImportModal;
+  $("brief-line").onclick = function () { setBriefOpen($("brief").hidden); };
+  $("bot-more").onclick = function (ev) {
+    ev.stopPropagation();
+    if ($("bot-menu").hidden) openBotMenu(); else closeBotMenu();
+  };
+  document.addEventListener("click", function () { closeBotMenu(); });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closeBotMenu(); });
   $("share-bot").onclick = function () { if (activeBot) shareBot(activeBot); };
   $("edit-bot").onclick = function () { if (activeBot) openBotModal(activeBot); };
   $("new-thread").onclick = newThread;

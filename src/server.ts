@@ -33,7 +33,8 @@ import { initAgent as initOpencode, runAgent as runOpencode, listSessions as lis
 import { initAgent as initCodex, runAgent as runCodex, listSessions as listCodexSessions, loadTranscript as loadCodexTranscript } from "./start-codex";
 import { startRelayMode } from "./relay-client";
 import { handleBotRoutes } from "./bot-routes";
-import { getBot, getThread, touchThread } from "./bot-store";
+import { getBot, getThread, touchThread, botNeedsSetup } from "./bot-store";
+import { botPermissionToSession } from "./server-common";
 
 export async function handleRequest(
   req: IRequest,
@@ -231,7 +232,8 @@ export async function handleRequest(
     if (method === "POST" && path === "/chat") {
       const body = await readBody(req);
       let { repoPath, agent, sessionId: existingId, model, permissionMode } = body;
-      const { prompt, mode, attachments, threadId } = body;
+      const { prompt, attachments, threadId } = body;
+      let { mode } = body;
       // attachments: Array<{ url: string }> | undefined
 
       // A threadId comes from the bot hub: it supplies the repo, the resume handle
@@ -246,13 +248,28 @@ export async function handleRequest(
         agent = "claude-code";
         existingId = thread.sdkSessionId ?? undefined;
         model = model ?? bot.model;
-        permissionMode = permissionMode ?? bot.permissionMode;
+        // Bot presets speak their own vocabulary ("auto-approve", "plan"); the
+        // session speaks PermissionMode. Translate, or nothing auto-approves.
+        const botPermission = botPermissionToSession(bot.permissionMode);
+        permissionMode = permissionMode ?? botPermission.permissionMode;
+        mode = mode ?? botPermission.mode;
+        const isSetup = thread.kind === "setup";
+        // Work waits on setup; the setup thread itself is exempt, since it is
+        // the thing that clears the block.
+        if (!isSetup && botNeedsSetup(bot)) {
+          jsonError(res, 409, `${bot.name} still needs to set up this machine`, {
+            setupRequired: true,
+            setupThreadId: bot.setupThreadId,
+          });
+          return;
+        }
         botPreset = {
           id: bot.id,
           name: bot.name,
           instructions: bot.instructions,
           allowedTools: bot.allowedTools,
           disallowedTools: bot.disallowedTools,
+          ...(isSetup ? { setup: true, setupInstructions: bot.setupInstructions } : {}),
         };
       }
 

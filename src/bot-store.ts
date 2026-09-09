@@ -5,6 +5,9 @@ import { homedir } from "os";
 
 // --- Types ---
 
+/** Machine-local: setup is about this computer, not about the bot's definition. */
+export type SetupStatus = "pending" | "complete" | "failed";
+
 export interface Bot {
   id: string;
   name: string;
@@ -12,6 +15,17 @@ export interface Bot {
   emoji: string;
   /** Appended to Claude Code's own system prompt. This is the bot's job description. */
   instructions: string;
+  /**
+   * What this bot needs on a machine before it can work — "ffmpeg must be on
+   * PATH", "run npm install in the repo". Travels with the bot when shared, and
+   * is run once, on this machine, in a thread of its own. Blank means the bot
+   * works anywhere and no setup run happens.
+   */
+  setupInstructions?: string;
+  /** Where this machine stands on that setup. Undefined when there is none to do. */
+  setupStatus?: SetupStatus;
+  /** The thread the setup run lives in, so it can be reopened and rejoined. */
+  setupThreadId?: string;
   model?: string;
   /** Default working directory for new threads. Threads may override. */
   repoPath?: string;
@@ -25,6 +39,8 @@ export interface Bot {
 export interface Thread {
   id: string;
   botId: string;
+  /** A setup thread prepares the machine; it runs before any chat thread may. */
+  kind?: "chat" | "setup";
   /** Claude Code session id — the resume handle. Null until the first turn completes. */
   sdkSessionId: string | null;
   title: string;
@@ -86,6 +102,8 @@ export function createBot(input: NewBot): Bot {
     description: input.description ?? "",
     emoji: input.emoji ?? "🤖",
     instructions: input.instructions ?? "",
+    setupInstructions: input.setupInstructions,
+    setupStatus: input.setupInstructions?.trim() ? "pending" : undefined,
     model: input.model,
     repoPath: input.repoPath,
     permissionMode: input.permissionMode ?? "ask-permissions",
@@ -104,7 +122,22 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot | undefined {
   const idx = bots.findIndex((b) => b.id === id);
   if (idx === -1) return undefined;
   const { id: _ignored, createdAt: _created, ...rest } = patch;
-  bots[idx] = { ...bots[idx], ...rest, updatedAt: now() };
+  const before = bots[idx];
+  const merged: Bot = { ...before, ...rest, updatedAt: now() };
+
+  // Setup state follows the instructions it exists for: gaining them arms a run,
+  // losing them drops it, and rewriting them asks the machine to be prepared
+  // again. An explicit status in the patch is the caller's own call and stands.
+  const had = !!before.setupInstructions?.trim();
+  const has = !!merged.setupInstructions?.trim();
+  if (!has) {
+    merged.setupStatus = undefined;
+    merged.setupThreadId = undefined;
+  } else if (rest.setupStatus === undefined) {
+    if (!had || merged.setupInstructions !== before.setupInstructions) merged.setupStatus = "pending";
+  }
+
+  bots[idx] = merged;
   writeCollection(BOTS_FILE, bots);
   return bots[idx];
 }
@@ -120,6 +153,39 @@ export function deleteBot(id: string): boolean {
   return true;
 }
 
+// --- Setup ---
+
+/**
+ * True while this machine still owes the bot a setup run. A bot with no setup
+ * instructions never owes one, so it is usable the moment it lands.
+ */
+export function botNeedsSetup(bot: Bot): boolean {
+  return !!bot.setupInstructions?.trim() && bot.setupStatus !== "complete";
+}
+
+/**
+ * The bot's setup thread, created on first ask. The thread is an ordinary
+ * Claude Code conversation — only its kind and its opening prompt differ — so
+ * the user can talk to it when the automatic run does not get all the way there.
+ */
+export function ensureSetupThread(botId: string, fallbackPath: string): Thread | undefined {
+  const bot = getBot(botId);
+  if (!bot || !bot.setupInstructions?.trim()) return undefined;
+
+  const existing = bot.setupThreadId ? getThread(bot.setupThreadId) : undefined;
+  if (existing) return existing;
+
+  const thread = createThread(bot.id, bot.repoPath || fallbackPath, `Set up ${bot.name}`, "setup");
+  updateBot(bot.id, { setupThreadId: thread.id, setupStatus: bot.setupStatus ?? "pending" });
+  return thread;
+}
+
+export function setSetupStatus(botId: string, status: SetupStatus): Bot | undefined {
+  const bot = getBot(botId);
+  if (!bot || !bot.setupInstructions?.trim()) return bot;
+  return updateBot(botId, { setupStatus: status });
+}
+
 // --- Threads ---
 
 export function listThreads(botId?: string): Thread[] {
@@ -133,12 +199,18 @@ export function getThread(id: string): Thread | undefined {
   return readCollection<Thread>(THREADS_FILE).find((t) => t.id === id);
 }
 
-export function createThread(botId: string, repoPath: string, title?: string): Thread {
+export function createThread(
+  botId: string,
+  repoPath: string,
+  title?: string,
+  kind: "chat" | "setup" = "chat"
+): Thread {
   const threads = readCollection<Thread>(THREADS_FILE);
   const ts = now();
   const thread: Thread = {
     id: randomUUID(),
     botId,
+    kind,
     sdkSessionId: null,
     title: title ?? defaultTitle(repoPath),
     titleIsAuto: !title,

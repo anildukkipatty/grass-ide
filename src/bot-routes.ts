@@ -17,6 +17,9 @@ import {
   createThread,
   updateThread,
   deleteThread,
+  botNeedsSetup,
+  ensureSetupThread,
+  setSetupStatus,
   type Bot,
 } from "./bot-store";
 import { existsSync, statSync } from "fs";
@@ -52,9 +55,33 @@ export async function handleBotRoutes(
         jsonError(res, 400, "name is required");
         return true;
       }
-      jsonOk(res, { bot: createBot({ ...body, name: body.name.trim() }) });
+      const bot = createBot({ ...body, name: body.name.trim() });
+      // A bot that states what it needs from a machine gets its setup thread the
+      // moment it lands here, whether it was made here or imported.
+      const setupThread = ensureSetupThread(bot.id, workspaceCwd);
+      jsonOk(res, { bot: getBot(bot.id) ?? bot, setupThread });
       return true;
     }
+  }
+
+  // POST /bots/:id/setup — the manual controls beside the automatic run.
+  const setupBotId = matchId(path, "/bots/", "/setup");
+  if (setupBotId && method === "POST") {
+    const bot = getBot(setupBotId);
+    if (!bot) { jsonError(res, 404, "Bot not found"); return true; }
+    if (!bot.setupInstructions?.trim()) { jsonError(res, 400, "This bot has no setup instructions"); return true; }
+    const body = await readBody(req);
+    const action = body.action;
+    if (action !== "complete" && action !== "reset" && action !== "fail") {
+      jsonError(res, 400, "action must be complete, reset or fail");
+      return true;
+    }
+    // A reset re-arms the run and makes sure there is a thread to run it in —
+    // the old one may have been deleted.
+    const updated = setSetupStatus(bot.id, action === "complete" ? "complete" : action === "fail" ? "failed" : "pending");
+    const setupThread = action === "reset" ? ensureSetupThread(bot.id, workspaceCwd) : undefined;
+    jsonOk(res, { bot: getBot(bot.id) ?? updated, setupThread });
+    return true;
   }
 
   const botId = matchId(path, "/bots/");
@@ -69,7 +96,9 @@ export async function handleBotRoutes(
       const body = await readBody(req);
       const bot = updateBot(botId, body as Partial<Bot>);
       if (!bot) { jsonError(res, 404, "Bot not found"); return true; }
-      jsonOk(res, { bot });
+      // Setup instructions can arrive on an edit, not just at creation.
+      const setupThread = ensureSetupThread(bot.id, workspaceCwd);
+      jsonOk(res, { bot: getBot(bot.id) ?? bot, setupThread });
       return true;
     }
     if (method === "DELETE") {
@@ -95,6 +124,16 @@ export async function handleBotRoutes(
       const repoPath = body.repoPath ?? bot.repoPath ?? workspaceCwd;
       if (!existsSync(repoPath) || !statSync(repoPath).isDirectory()) {
         jsonError(res, 400, `Not a directory: ${repoPath}`);
+        return true;
+      }
+      // Setup comes first: a bot that has not prepared this machine cannot be
+      // given work yet. Its own setup thread is made by the server, never here.
+      if (botNeedsSetup(bot)) {
+        const setupThread = ensureSetupThread(bot.id, workspaceCwd);
+        jsonError(res, 409, `${bot.name} still needs to set up this machine`, {
+          setupRequired: true,
+          setupThreadId: setupThread?.id,
+        });
         return true;
       }
       jsonOk(res, { thread: createThread(bot.id, repoPath, body.title) });
@@ -131,7 +170,11 @@ export async function handleBotRoutes(
       return true;
     }
     if (method === "DELETE") {
+      const thread = getThread(threadId);
       if (!deleteThread(threadId)) { jsonError(res, 404, "Thread not found"); return true; }
+      // Deleting the setup thread leaves the bot pointing at nothing; unbind so
+      // the next run can make a fresh one.
+      if (thread && thread.kind === "setup") updateBot(thread.botId, { setupThreadId: undefined });
       jsonOk(res, { deleted: true });
       return true;
     }

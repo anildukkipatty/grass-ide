@@ -199,6 +199,22 @@ export const TOOL_BLACKLIST: Record<"claude-code" | "opencode" | "codex", Set<st
   "codex": new Set(),
 };
 
+/**
+ * Bot presets describe permissions in the hub's words; sessions want a
+ * PermissionMode (and, for plan, a run mode). Keep the two vocabularies in sync
+ * here — a preset value with no translation silently ends up asking for
+ * everything.
+ */
+export function botPermissionToSession(
+  botMode: "ask-permissions" | "auto-approve" | "plan"
+): { permissionMode: PermissionMode; mode?: "plan" | "build" } {
+  switch (botMode) {
+    case "auto-approve": return { permissionMode: "yolo" };
+    case "plan": return { permissionMode: "yolo", mode: "plan" };
+    default: return { permissionMode: "ask-permissions" };
+  }
+}
+
 export function shouldAutoApprove(
   agent: "claude-code" | "opencode" | "codex",
   toolName: string,
@@ -240,6 +256,10 @@ export interface BotPreset {
   instructions: string;
   allowedTools?: string[];
   disallowedTools?: string[];
+  /** Set only on a setup thread: what this bot needs the machine to have. */
+  setupInstructions?: string;
+  /** True while this run is the machine-preparation run rather than the bot's job. */
+  setup?: boolean;
 }
 
 export const sessions = new Map<string, SessionStore>();
@@ -554,9 +574,15 @@ export function jsonOk(res: IResponse, body: unknown): void {
   res.end(data);
 }
 
-export function jsonError(res: IResponse, status: number, message: string): void {
+/** `extra` rides alongside the message for errors the client acts on, not just shows. */
+export function jsonError(
+  res: IResponse,
+  status: number,
+  message: string,
+  extra?: Record<string, unknown>
+): void {
   res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: message }));
+  res.end(JSON.stringify({ error: message, ...extra }));
 }
 
 export function readBody(req: IRequest): Promise<any> {
