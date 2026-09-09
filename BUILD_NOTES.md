@@ -1,13 +1,13 @@
-# Build Notes: `grass start` — WebSocket + Claude Agent SDK
+# Build Notes: `gitbot start` — WebSocket + Claude Agent SDK
 
 ## What was built
 
-A `grass start` command that launches a WebSocket server bridging clients to a Claude agent via the Claude Agent SDK v2 preview.
+A `gitbot start` command that launches a WebSocket server bridging clients to a Claude agent via the Claude Agent SDK v2 preview.
 
 ## Architecture
 
 ```
-Client (WS) <---> grass start (WS Server :3000) <---> Claude Agent SDK (session)
+Client (WS) <---> gitbot start (WS Server :3000) <---> Claude Agent SDK (session)
 ```
 
 - One Claude session per WS connection (multi-turn, persistent)
@@ -17,7 +17,7 @@ Client (WS) <---> grass start (WS Server :3000) <---> Claude Agent SDK (session)
 ## Files changed
 
 - **`src/start.ts`** (new) — WS server + SDK session management
-- **`src/index.ts`** (modified) — registered `grass start` command with commander
+- **`src/index.ts`** (modified) — registered `gitbot start` command with commander
 
 ## Dependencies added
 
@@ -90,12 +90,9 @@ Note: `cwd` is NOT in v2 options (it's a v1-only field). The session uses the cw
 ```
 cli/
   src/
-    index.ts    — CLI entrypoint (commander: sync, ls, start)
+    index.ts    — CLI entrypoint (commander: start)
     start.ts    — WS server + Claude Agent SDK
-    sync.ts     — sync command
-    ls.ts       — ls command
-    progress.ts — progress bar utility
   dist/         — compiled output (commonjs)
-  package.json  — type: "commonjs", bin: grass -> dist/index.js
+  package.json  — type: "commonjs", bin: gitbot -> dist/index.js
   tsconfig.json — target ES2020, module commonjs, strict
 ```
