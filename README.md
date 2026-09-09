@@ -2,7 +2,7 @@
 
 <img src="assets/logo.png" alt="Grass" width="500" />
 
-[![npm version](https://img.shields.io/npm/v/@grass-ai/ide)](https://www.npmjs.com/package/@grass-ai/ide)
+[![npm version](https://img.shields.io/npm/v/gitbot-ai)](https://www.npmjs.com/package/gitbot-ai)
 
 # grass
 
@@ -33,10 +33,10 @@ No cloud relay. No copy-pasting. Just scan and go.
 ## Installation
 
 ```bash
-npm install -g @grass-ai/ide
+npm install -g gitbot-ai
 ```
 
-That's it. `grass` is now available everywhere.
+That's it. `gitbot` is now available everywhere.
 
 > [!NOTE]
 > Grass requires **Node.js 18+**. The Claude Code agent requires the `claude` CLI to be installed and authenticated on your machine. The Opencode agent requires the `@opencode-ai/sdk` package.
@@ -60,7 +60,7 @@ npm install -g .
 cd ~/projects
 
 # Start grass
-grass start
+gitbot start
 ```
 
 That's it. You'll see something like:
@@ -89,7 +89,7 @@ Open the URL or scan the QR code. From the chat UI, select a repository and an a
 Grass runs a single HTTP server that handles everything:
 
 1. **Serves a chat UI** — A full-featured React app, embedded directly in the binary. No separate frontend to deploy.
-2. **Manages a workspace** — Grass treats the directory where you run `grass start` as a workspace. It can list the subdirectories as repos, browse their file trees, read files, and clone new repos into the workspace.
+2. **Manages a workspace** — Grass treats the directory where you run `gitbot start` as a workspace. It can list the subdirectories as repos, browse their file trees, read files, and clone new repos into the workspace.
 3. **Bridges to AI agents** — Each chat session creates a real agent session via the Claude Agent SDK (for Claude Code) or the Opencode SDK. The agent sees your project files, can edit code, run commands — everything it normally does.
 4. **Streams events to the UI** — Agent output is delivered via Server-Sent Events (SSE), so the UI receives a live stream of assistant messages, tool calls, permission requests, and status updates.
 
@@ -111,12 +111,12 @@ Grass no longer requires you to specify a port. It auto-selects an available por
 
 ## Commands
 
-### `grass start`
+### `gitbot start`
 
 The main command. Starts the HTTP server with SSE event streaming.
 
 ```bash
-grass start [options]
+gitbot start [options]
 ```
 
 | Flag | Description |
@@ -138,26 +138,26 @@ grass start [options]
 
 ```bash
 # Default — auto-selected port, LAN IP, great for phone on same WiFi
-grass start
+gitbot start
 
 # Specify a port
-grass start -p 3000
+gitbot start -p 3000
 
 # Use Tailscale for remote access
-grass start --network tailscale
+gitbot start --network tailscale
 
 # Keep your Mac awake while coding from the couch
-grass start --caffeinate
+gitbot start --caffeinate
 
 # Use a custom domain
-grass start --network mybox.local
+gitbot start --network mybox.local
 ```
 
-### `grass sync`
+### `gitbot sync`
 
 Sync project to cloud. *(Currently a preview/demo — not yet functional.)*
 
-### `grass ls`
+### `gitbot ls`
 
 List available sandboxes. *(Currently a preview/demo — not yet functional.)*
 
@@ -368,7 +368,7 @@ npm run build
 ./dist/index.js start
 ```
 
-The working directory where you run `grass start` is treated as the workspace root. Repos are the subdirectories of that workspace. You can run grass from any directory — the UI lets you pick the repo before starting a session.
+The working directory where you run `gitbot start` is treated as the workspace root. Repos are the subdirectories of that workspace. You can run grass from any directory — the UI lets you pick the repo before starting a session.
 
 ## Security Considerations
 

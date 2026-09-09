@@ -1,10 +1,10 @@
 {
-  "name": "@grass-ai/ide",
-  "version": "1.8.1",
-  "description": "CLI that bridges clients to Claude agents via the Claude Agent SDK",
+  "name": "gitbot-ai",
+  "version": "0.0.1",
+  "description": "Run Claude Code, Codex, or OpenCode from any device on your network \u2014 a local server that puts an AI coding agent in your browser, with reusable bots, threads, and per-bot setup instructions.",
   "main": "dist/index.js",
   "bin": {
-    "grass": "dist/index.js"
+    "gitbot": "dist/index.js"
   },
   "files": [
     "dist",
@@ -17,9 +17,13 @@
   },
   "keywords": [
     "claude",
+    "codex",
+    "opencode",
     "ai",
     "agent",
     "cli",
+    "coding-agent",
+    "bot",
     "websocket"
   ],
   "repository": {

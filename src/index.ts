@@ -13,8 +13,8 @@ import { start } from "./server";
 const program = new Command();
 
 program
-  .name("grass")
-  .description("Grass CLI")
+  .name("gitbot")
+  .description("gitbot — run an AI coding agent from any device on your network")
   .version(require("../package.json").version);
 
 program
