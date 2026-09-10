@@ -23,6 +23,7 @@ import {
   type SessionStore,
   type PermissionMode,
 } from "./server-common";
+import { dataDir } from "./bot-store";
 
 let CodexCtor: typeof CodexClass | null = null;
 
@@ -90,13 +91,13 @@ export async function runAgent(store: SessionStore): Promise<void> {
   let { approvalPolicy, sandboxMode } = permissionToCodex(store.permissionMode);
   if (store.mode === "plan") sandboxMode = "read-only";
 
-  const baseDir = join(homedir(), ".grass", "codex-attachments");
+  const baseDir = join(dataDir(), "codex-attachments");
   let attachmentDir: string;
   let isStaging = false;
   if (store.sdkSessionId) {
     attachmentDir = join(baseDir, store.sdkSessionId);
   } else {
-    attachmentDir = join(baseDir, `_staging-${store.grassId}`);
+    attachmentDir = join(baseDir, `_staging-${store.gitbotId}`);
     isStaging = true;
   }
 
@@ -803,7 +804,7 @@ export async function loadTranscript(
   const filePath = await findSessionFile(threadId);
   if (!filePath) return [];
 
-  const manifestPath = join(homedir(), ".grass", "codex-attachments", threadId, "manifest.json");
+  const manifestPath = join(dataDir(), "codex-attachments", threadId, "manifest.json");
   let manifest: ManifestEntry[] = [];
   if (existsSync(manifestPath)) {
     try {

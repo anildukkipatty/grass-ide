@@ -80,6 +80,9 @@ export async function runAgent(store: SessionStore): Promise<void> {
         abortController,
         includePartialMessages: true,
         cwd: store.repoPath,
+        // The SDK loads no filesystem config by default. Opt in so the bot picks up
+        // .mcp.json servers (plus CLAUDE.md and permission settings) the way the CLI does.
+        settingSources: ["user", "project", "local"],
         stderr: (data: string) => {
           stderrTail.push(data);
           if (stderrTail.length > 20) stderrTail.shift();

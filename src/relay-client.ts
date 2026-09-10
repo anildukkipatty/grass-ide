@@ -1,11 +1,10 @@
 import WebSocket from "ws";
 import { randomBytes } from "crypto";
 import { readFile, writeFile } from "fs/promises";
-import { join } from "path";
-import { showRelayQR, setPushNotificationSender } from "./server-common";
+import { showRelayQR, setPushNotificationSender, relayTokenPath } from "./server-common";
 import { handleRequest } from "./server";
 import type { IRequest, IResponse } from "./server-common";
-import type { RelayToGrassFrame, GrassToRelayFrame } from "./relay-types";
+import type { RelayToGitbotFrame, GitbotToRelayFrame } from "./relay-types";
 
 // --- RelayRequest ---
 // Implements IRequest without depending on a real socket.
@@ -70,7 +69,7 @@ class RelayResponse implements IResponse {
     this._ws = ws;
   }
 
-  private _send(frame: GrassToRelayFrame): void {
+  private _send(frame: GitbotToRelayFrame): void {
     if (this._ws.readyState === WebSocket.OPEN) {
       this._ws.send(JSON.stringify(frame));
     }
@@ -97,10 +96,8 @@ class RelayResponse implements IResponse {
 
 // --- Token persistence ---
 
-const TOKEN_FILE = ".grass-relay-token";
-
 async function loadOrCreateToken(workspaceCwd: string): Promise<string> {
-  const tokenPath = join(workspaceCwd, TOKEN_FILE);
+  const tokenPath = relayTokenPath(workspaceCwd);
   try {
     const existing = (await readFile(tokenPath, "utf-8")).trim();
     if (existing.length >= 16) {
@@ -150,19 +147,19 @@ export async function startRelayMode(
 
     ws.on("open", () => {
       backoff = BACKOFF_INITIAL_MS;
-      const registerFrame: GrassToRelayFrame = { type: "register", token };
+      const registerFrame: GitbotToRelayFrame = { type: "register", token };
       ws.send(JSON.stringify(registerFrame));
       setPushNotificationSender((title, body, data) => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "push_notification", title, body, data } satisfies GrassToRelayFrame));
+          ws.send(JSON.stringify({ type: "push_notification", title, body, data } satisfies GitbotToRelayFrame));
         }
       });
     });
 
     ws.on("message", async (raw) => {
-      let frame: RelayToGrassFrame;
+      let frame: RelayToGitbotFrame;
       try {
-        frame = JSON.parse(raw.toString()) as RelayToGrassFrame;
+        frame = JSON.parse(raw.toString()) as RelayToGitbotFrame;
       } catch {
         return;
       }

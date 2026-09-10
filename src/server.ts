@@ -136,7 +136,7 @@ export async function handleRequest(
         ?? [...sessions.values()].find(s => s.sdkSessionId === configId);
       if (!store) { jsonError(res, 404, "Session not found"); return; }
       jsonOk(res, {
-        grassId: store.grassId,
+        gitbotId: store.gitbotId,
         sessionId: store.sdkSessionId,
         agent: store.agent,
         model: store.model ?? null,
@@ -306,8 +306,8 @@ export async function handleRequest(
         if (threadId) { store.threadId = threadId; store.botPreset = botPreset; }
         emitEvent(store, 'user_prompt', { prompt: prompt ?? '', ...(attachments?.length ? { attachments } : {}) });
       } else {
-        const grassId = existingId ?? randomUUID();
-        store = createSession(grassId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined, { threadId, preset: botPreset });
+        const gitbotId = existingId ?? randomUUID();
+        store = createSession(gitbotId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined, { threadId, preset: botPreset });
         if (existingId) {
           store.sdkSessionId = existingId;
         }
@@ -335,7 +335,7 @@ export async function handleRequest(
         }).finally(() => notifySessionEnded());
       }
 
-      jsonOk(res, { sessionId: s.grassId });
+      jsonOk(res, { sessionId: s.gitbotId });
       return;
     }
 
@@ -434,7 +434,7 @@ export async function handleRequest(
         }
       }
 
-      jsonOk(res, { sessionId: store.grassId, permissionMode: store.permissionMode });
+      jsonOk(res, { sessionId: store.gitbotId, permissionMode: store.permissionMode });
       return;
     }
 
@@ -449,14 +449,14 @@ export async function handleRequest(
 
 export async function start(network: string = "local", portOverride?: number, caffeinate: boolean = false, relayUrl?: string) {
   const workspaceCwd = process.cwd();
-  console.log(`Starting grass server...`);
+  console.log(`gitbot — starting workspace server in ${workspaceCwd}`);
 
   // Claude Code refuses to spawn inside another Claude Code session, which would
   // otherwise surface only as an opaque "exited with code 1" on the first message.
   if (process.env.CLAUDECODE) {
     console.warn(`  warning: CLAUDECODE is set — this shell is inside a Claude Code session.`);
-    console.warn(`  The claude-code agent will refuse to start. Run grass from a plain terminal,`);
-    console.warn(`  or launch it with: env -u CLAUDECODE grass start -p <port>`);
+    console.warn(`  The claude-code agent will refuse to start. Run gitbot from a plain terminal,`);
+    console.warn(`  or launch it with: env -u CLAUDECODE gitbot start -p <port>`);
   }
 
   const claudeAvailable = await initClaudeCode();
@@ -480,7 +480,7 @@ export async function start(network: string = "local", portOverride?: number, ca
     portOverride,
     caffeinate,
     network,
-    label: "grass server",
+    label: "gitbot server",
   });
 
   server.on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {

@@ -56,10 +56,26 @@ export interface Thread {
 export type NewBot = Partial<Bot> & Pick<Bot, "name">;
 
 // --- Storage ---
-// Two JSON files under ~/.grass. Small collections, read fully and written atomically.
+// Two JSON files under ~/.gitbot. Small collections, read fully and written atomically.
 // All access goes through this module so the backing store can be swapped later.
 
-const DATA_DIR = process.env.GRASS_DATA_DIR ?? join(homedir(), ".grass");
+// ~/.grass is the pre-rename location: keep using it when it exists and the new
+// directory does not, so an upgrade doesn't orphan someone's bots and threads.
+function resolveDataDir(): string {
+  if (process.env.GITBOT_DATA_DIR) return process.env.GITBOT_DATA_DIR;
+  if (process.env.GRASS_DATA_DIR) return process.env.GRASS_DATA_DIR;
+  const current = join(homedir(), ".gitbot");
+  const legacy = join(homedir(), ".grass");
+  if (!existsSync(current) && existsSync(legacy)) return legacy;
+  return current;
+}
+
+const DATA_DIR = resolveDataDir();
+
+/** The resolved gitbot data directory, shared by other modules that persist state. */
+export function dataDir(): string {
+  return DATA_DIR;
+}
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const THREADS_FILE = join(DATA_DIR, "threads.json");
 

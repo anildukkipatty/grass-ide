@@ -18,11 +18,11 @@ async function loadOpencodeSdk() {
 // Per-directory opencode clients
 const clientsByDir = new Map<string, any>();
 
-// Reverse-lookup: opencode session ID → grass session ID
-const sdkIdToGrassId = new Map<string, string>();
+// Reverse-lookup: opencode session ID → gitbot session ID
+const sdkIdToGitbotId = new Map<string, string>();
 
-// Cache of subagent (child) sdkSessionId → root grass session ID, populated by walking parentID.
-const childSdkIdToRootGrassId = new Map<string, string>();
+// Cache of subagent (child) sdkSessionId → root gitbot session ID, populated by walking parentID.
+const childSdkIdToRootGitbotId = new Map<string, string>();
 // Dedupe concurrent in-flight parent walks for the same sdkSessionId.
 const resolveInflight = new Map<string, Promise<SessionStore | undefined>>();
 
@@ -75,7 +75,7 @@ async function getClientForDir(directory: string): Promise<any> {
   }
 
   startEventStream(client, directory).catch((err) => {
-    console.error("[grass] startEventStream crashed:", err);
+    console.error("[gitbot] startEventStream crashed:", err);
   });
   return client;
 }
@@ -100,7 +100,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
       emitEvent(store, "system", { subtype: "init", session_id: sdkId });
     }
     // Always register the mapping so event stream can find the store
-    sdkIdToGrassId.set(store.sdkSessionId!, store.grassId);
+    sdkIdToGitbotId.set(store.sdkSessionId!, store.gitbotId);
 
 
     // Parse model string into providerID/modelID if provided
@@ -236,13 +236,13 @@ function extractSessionId(_type: string, props: any): string | undefined {
 }
 
 function findStoreByOpencodeSdkId(sdkId: string): SessionStore | undefined {
-  const grassId = sdkIdToGrassId.get(sdkId) ?? childSdkIdToRootGrassId.get(sdkId);
-  if (!grassId) return undefined;
-  return sessions.get(grassId);
+  const gitbotId = sdkIdToGitbotId.get(sdkId) ?? childSdkIdToRootGitbotId.get(sdkId);
+  if (!gitbotId) return undefined;
+  return sessions.get(gitbotId);
 }
 
 // Walk session.parentID via the SDK until we land on a session we own (root) or run out.
-// Returns the root grass store and caches the mapping. Used to route subagent events
+// Returns the root gitbot store and caches the mapping. Used to route subagent events
 // to the parent thread.
 async function resolveParentStore(client: any, sdkSessionId: string): Promise<SessionStore | undefined> {
   const direct = findStoreByOpencodeSdkId(sdkSessionId);
@@ -258,10 +258,10 @@ async function resolveParentStore(client: any, sdkSessionId: string): Promise<Se
       const data = got?.data;
       if (!data?.parentID) return undefined;
       cur = data.parentID;
-      const rootGrassId = sdkIdToGrassId.get(cur);
-      if (rootGrassId) {
-        childSdkIdToRootGrassId.set(sdkSessionId, rootGrassId);
-        return sessions.get(rootGrassId);
+      const rootGitbotId = sdkIdToGitbotId.get(cur);
+      if (rootGitbotId) {
+        childSdkIdToRootGitbotId.set(sdkSessionId, rootGitbotId);
+        return sessions.get(rootGitbotId);
       }
     }
     return undefined;
@@ -290,7 +290,7 @@ async function startEventStream(client: any, directory: string) {
         void resolveParentStore(client, sdkSessionId);
         continue;
       }
-      // Child events: store was reached via childSdkIdToRootGrassId (root's parent store),
+      // Child events: store was reached via childSdkIdToRootGitbotId (root's parent store),
       // so its sdkSessionId differs from the event's sdkSessionId.
       const isChildEvent = sdkSessionId !== store.sdkSessionId;
 

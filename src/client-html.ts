@@ -3,7 +3,7 @@ export const html = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>grass — bot hub</title>
+<title>gitbot — bot hub</title>
 <style>
   :root {
     --bg: #f7f7f9;
@@ -364,7 +364,14 @@ export const html = `<!DOCTYPE html>
     background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
     box-shadow: var(--shadow-md); width: min(580px, 100%); max-height: 90vh; overflow-y: auto; padding: 26px;
   }
-  .modal h2 { font-size: 19px; margin-bottom: 20px; }
+  .modal h2 { font-size: 19px; }
+  .modal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .modal-head h2 { flex: 1; margin: 0; }
+  .modal-x {
+    flex: none; width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--faint); font-size: 16px; line-height: 1; cursor: pointer;
+  }
+  .modal-x:hover { color: var(--text); border-color: var(--faint); }
   .field { margin-bottom: 16px; }
   .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
   .field .hint { font-weight: 400; color: var(--faint); }
@@ -531,6 +538,19 @@ export const html = `<!DOCTYPE html>
     if (cls) n.className = cls;
     if (text !== undefined && text !== null) n.textContent = String(text);
     return n;
+  }
+
+  /** Modal title row with the "x" close button; modals never close on an outside click. */
+  function modalHead(modal, title, close) {
+    var head = el("div", "modal-head");
+    head.appendChild(el("h2", null, title));
+    var x = el("button", "modal-x", "\u00D7");
+    x.title = "Close";
+    x.setAttribute("aria-label", "Close");
+    x.onclick = close;
+    head.appendChild(x);
+    modal.appendChild(head);
+    return head;
   }
 
   // --- API ---
@@ -984,7 +1004,12 @@ export const html = `<!DOCTYPE html>
   function openFolderPicker(startPath, onPick) {
     var backdrop = el("div", "backdrop");
     var modal = el("div", "modal");
-    modal.appendChild(el("h2", null, "Where should this thread run?"));
+    function close() {
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+    }
+    function esc(ev) { if (ev.key === "Escape") close(); }
+    modalHead(modal, "Where should this thread run?", close);
 
     var jumps = el("div", "jumps");
     var pathbar = el("div", "pathbar", "\u2026");
@@ -1040,15 +1065,15 @@ export const html = `<!DOCTYPE html>
     var acts = el("div", "acts");
     var def = el("button", "btn ghost", "Use default");
     def.title = "Run where the CLI was started (or the bot's directory)";
-    def.onclick = function () { backdrop.remove(); onPick(null); };
+    def.onclick = function () { close(); onPick(null); };
     acts.appendChild(def);
     acts.appendChild(el("div", "spacer"));
     var cancel = el("button", "btn", "Cancel");
-    cancel.onclick = function () { backdrop.remove(); };
+    cancel.onclick = close;
     var pick = el("button", "btn primary", "Run here");
     pick.onclick = function () {
       if (!current) return;
-      backdrop.remove();
+      close();
       onPick(current);
     };
     acts.appendChild(cancel);
@@ -1056,10 +1081,7 @@ export const html = `<!DOCTYPE html>
     modal.appendChild(acts);
 
     backdrop.appendChild(modal);
-    backdrop.onclick = function (ev) { if (ev.target === backdrop) backdrop.remove(); };
-    document.addEventListener("keydown", function esc(ev) {
-      if (ev.key === "Escape") { backdrop.remove(); document.removeEventListener("keydown", esc); }
-    });
+    document.addEventListener("keydown", esc);
     document.body.appendChild(backdrop);
     load(startPath);
   }
@@ -1473,7 +1495,10 @@ export const html = `<!DOCTYPE html>
   // A bot is portable: everything that defines its behaviour travels, and
   // nothing that is local to one machine does. repoPath is deliberately left
   // behind — the folder a bot works in is the receiver's to choose.
-  var SHARE_PREFIX = "grassbot:v1:";
+  var SHARE_PREFIX = "gitbot:v1:";
+  // "grassbot:v1:" is the pre-rename prefix. Codes already in circulation carry
+  // it, so import still accepts it; export only ever writes the current one.
+  var LEGACY_SHARE_PREFIXES = ["grassbot:v1:"];
   // setupStatus and setupThreadId stay behind with repoPath: they describe this
   // machine, not the bot. The receiving machine works out its own.
   var SHARE_FIELDS = ["name", "emoji", "description", "instructions", "setupInstructions",
@@ -1510,11 +1535,14 @@ export const html = `<!DOCTYPE html>
     var raw = String(text || "").trim();
     if (!raw) return null;
     var json = raw;
-    var at = raw.indexOf(SHARE_PREFIX);
-    if (at !== -1) {
+    var prefixes = [SHARE_PREFIX].concat(LEGACY_SHARE_PREFIXES);
+    for (var p = 0; p < prefixes.length; p++) {
+      var at = raw.indexOf(prefixes[p]);
+      if (at === -1) continue;
       // Tolerate a code that picked up quotes or a wrapping sentence in transit.
-      var code = raw.slice(at + SHARE_PREFIX.length).split(/[^A-Za-z0-9_-]/)[0];
+      var code = raw.slice(at + prefixes[p].length).split(/[^A-Za-z0-9_-]/)[0];
       try { json = fromB64(code); } catch (e) { return null; }
+      break;
     }
     var obj;
     try { obj = JSON.parse(json); } catch (e) { return null; }
@@ -1575,7 +1603,7 @@ export const html = `<!DOCTYPE html>
   /** Shown only when the clipboard is unavailable: the code, ready to copy by hand. */
   function openShareModal(bot, code) {
     var parts = modalShell("Share " + bot.name);
-    parts.modal.appendChild(el("p", "picker-note", "Copying was blocked by the browser. Copy this code and paste it into another grass."));
+    parts.modal.appendChild(el("p", "picker-note", "Copying was blocked by the browser. Copy this code and paste it into another gitbot."));
     var box = el("textarea", "code");
     box.value = code;
     box.readOnly = true;
@@ -1669,14 +1697,13 @@ export const html = `<!DOCTYPE html>
   function modalShell(title) {
     var backdrop = el("div", "backdrop");
     var modal = el("div", "modal");
-    modal.appendChild(el("h2", null, title));
     backdrop.appendChild(modal);
     function close() {
       backdrop.remove();
       document.removeEventListener("keydown", esc);
     }
     function esc(ev) { if (ev.key === "Escape") close(); }
-    backdrop.onclick = function (ev) { if (ev.target === backdrop) close(); };
+    modalHead(modal, title, close);
     return {
       modal: modal,
       close: close,
@@ -1692,7 +1719,12 @@ export const html = `<!DOCTYPE html>
     var editing = !!bot;
     var backdrop = el("div", "backdrop");
     var modal = el("div", "modal");
-    modal.appendChild(el("h2", null, editing ? "Edit bot" : "New bot"));
+    function close() {
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+    }
+    function esc(ev) { if (ev.key === "Escape") close(); }
+    modalHead(modal, editing ? "Edit bot" : "New bot", close);
 
     function field(label, hint, control) {
       var wrap = el("div", "field");
@@ -1753,14 +1785,14 @@ export const html = `<!DOCTYPE html>
       del.onclick = function () {
         if (!confirm("Delete " + bot.name + " and all of its threads?")) return;
         api("/bots/" + bot.id, { method: "DELETE" })
-          .then(function () { backdrop.remove(); return goHome(); })
+          .then(function () { close(); return goHome(); })
           .catch(showError);
       };
       acts.appendChild(del);
     }
     acts.appendChild(el("div", "spacer"));
     var cancel = el("button", "btn", "Cancel");
-    cancel.onclick = function () { backdrop.remove(); };
+    cancel.onclick = close;
     var save = el("button", "btn primary", editing ? "Save" : "Create bot");
     save.onclick = function () {
       if (!name.value.trim()) { name.focus(); return; }
@@ -1780,7 +1812,7 @@ export const html = `<!DOCTYPE html>
         ? api("/bots/" + bot.id, { method: "PATCH", body: body })
         : api("/bots", { method: "POST", body: body });
       req.then(function (d) {
-        backdrop.remove();
+        close();
         return api("/threads").then(function (r) {
           allThreads = r.threads || [];
           return api("/bots");
@@ -1799,10 +1831,7 @@ export const html = `<!DOCTYPE html>
     modal.appendChild(acts);
 
     backdrop.appendChild(modal);
-    backdrop.onclick = function (ev) { if (ev.target === backdrop) backdrop.remove(); };
-    document.addEventListener("keydown", function esc(ev) {
-      if (ev.key === "Escape") { backdrop.remove(); document.removeEventListener("keydown", esc); }
-    });
+    document.addEventListener("keydown", esc);
     document.body.appendChild(backdrop);
     name.focus();
   }

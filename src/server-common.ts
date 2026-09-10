@@ -1,5 +1,5 @@
 import { networkInterfaces } from "os";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { execSync, execFile, spawn } from "child_process";
 import http from "node:http";
@@ -229,7 +229,7 @@ export function shouldAutoApprove(
 }
 
 export interface SessionStore {
-  grassId: string;
+  gitbotId: string;
   sdkSessionId: string | null;
   agent: "claude-code" | "opencode" | "codex";
   repoPath: string;
@@ -286,7 +286,7 @@ export function buildPermissionsDump(): PermissionDumpItem[] {
     const repoName = store.repoPath.split("/").filter(Boolean).pop() ?? store.repoPath;
     for (const perm of store.pendingPermissions.values()) {
       items.push({
-        sessionId: store.grassId,
+        sessionId: store.gitbotId,
         sdkSessionId: store.sdkSessionId,
         agent: store.agent,
         repoPath: store.repoPath,
@@ -303,14 +303,14 @@ export function buildPermissionsDump(): PermissionDumpItem[] {
 export type SessionStatus = "running" | "awaiting_permissions" | "done" | "error";
 
 export interface SessionSummaryItem {
-  grassId: string;
+  gitbotId: string;
   sessionId: string | null;
   status: SessionStatus;
 }
 
 export function buildSessionsDump(): SessionSummaryItem[] {
   return [...sessions.values()].map(store => ({
-    grassId: store.grassId,
+    gitbotId: store.gitbotId,
     sessionId: store.sdkSessionId,
     status: store.pendingPermissions.size > 0 ? "awaiting_permissions" : store.status,
   }));
@@ -339,7 +339,7 @@ export function notifyNewPermission(toolName: string): void {
   if (permissionsEmitter.listenerCount("update") === 0) {
     sendPushViaRelay(
       "Permission required",
-      `Grass wants to use ${toolName}. Tap to review.`,
+      `gitbot wants to use ${toolName}. Tap to review.`,
       { type: "permission" }
     );
   } else {
@@ -349,7 +349,7 @@ export function notifyNewPermission(toolName: string): void {
       if (buildPermissionsDump().length > 0) {
         sendPushViaRelay(
           "Permission required",
-          `Grass wants to use ${toolName}. Tap to review.`,
+          `gitbot wants to use ${toolName}. Tap to review.`,
           { type: "permission" }
         );
       }
@@ -361,8 +361,8 @@ export function notifySessionDone(store: SessionStore): void {
   const repoName = store.repoPath.split("/").filter(Boolean).pop() ?? store.repoPath;
   const send = () => sendPushViaRelay(
     "Task complete",
-    `Grass finished working on ${repoName}. Tap to see the response.`,
-    { type: "task_complete", sessionId: store.grassId }
+    `gitbot finished working on ${repoName}. Tap to see the response.`,
+    { type: "task_complete", sessionId: store.gitbotId }
   );
 
   if (store.emitter.listenerCount("event") === 0) {
@@ -373,7 +373,7 @@ export function notifySessionDone(store: SessionStore): void {
 }
 
 export function createSession(
-  grassId: string,
+  gitbotId: string,
   agent: "claude-code" | "opencode" | "codex",
   repoPath: string,
   model?: string,
@@ -382,7 +382,7 @@ export function createSession(
   bot?: { threadId?: string; preset?: BotPreset }
 ): SessionStore {
   const store: SessionStore = {
-    grassId,
+    gitbotId,
     sdkSessionId: null,
     agent,
     repoPath,
@@ -399,7 +399,7 @@ export function createSession(
     threadId: bot?.threadId,
     botPreset: bot?.preset,
   };
-  sessions.set(grassId, store);
+  sessions.set(gitbotId, store);
   return store;
 }
 
@@ -407,7 +407,7 @@ export function scheduleCleanup(_store: SessionStore): void {
   // Session cleanup disabled — sessions are kept in memory indefinitely
   // if (store.cleanupTimer) clearTimeout(store.cleanupTimer);
   // store.cleanupTimer = setTimeout(() => {
-  //   sessions.delete(store.grassId);
+  //   sessions.delete(store.gitbotId);
   // }, 60 * 60 * 1000);
 }
 
@@ -419,6 +419,18 @@ export function emitEvent(store: SessionStore, type: string, data: Record<string
 }
 
 
+/**
+ * Where the relay token lives for a workspace. `.grass-relay-token` is the
+ * pre-rename name: keep honouring it when it is the only one present, so an
+ * upgrade doesn't hand the relay a brand-new identity.
+ */
+export function relayTokenPath(cwd: string): string {
+  const current = join(cwd, ".gitbot-relay-token");
+  const legacy = join(cwd, ".grass-relay-token");
+  if (!existsSync(current) && existsSync(legacy)) return legacy;
+  return current;
+}
+
 let _keepAliveInterval: ReturnType<typeof setInterval> | null = null;
 let _activeSessionCount = 0;
 
@@ -427,7 +439,7 @@ function _pingActivity(): void {
   if (!apiUrl) return;
   let token: string;
   try {
-    token = readFileSync(join(process.cwd(), ".grass-relay-token"), "utf8").trim();
+    token = readFileSync(relayTokenPath(process.cwd()), "utf8").trim();
   } catch { return; }
   if (!token) return;
   fetch(`${apiUrl}/containers/activity`, {
@@ -474,7 +486,7 @@ export async function createHttpServer(opts: {
       console.log(`  port: ${PORT} (auto-selected from ${PORT_RANGE_START}–${PORT_RANGE_END})`);
     } catch {
       console.error(`\n  No available port found in range ${PORT_RANGE_START}–${PORT_RANGE_END}.`);
-      console.error(`  Try stopping other grass sessions, or run with -p to specify a port.\n`);
+      console.error(`  Try stopping other gitbot sessions, or run with -p to specify a port.\n`);
       process.exit(1);
     }
   }
@@ -498,7 +510,7 @@ export async function createHttpServer(opts: {
       if (opts.portOverride !== undefined) {
         console.error(`  Please choose a different port with -p, or run without -p to auto-select one.\n`);
       } else {
-        console.error(`  Try stopping other grass sessions, or run with -p to specify a port.\n`);
+        console.error(`  Try stopping other gitbot sessions, or run with -p to specify a port.\n`);
       }
       process.exit(1);
     }
@@ -530,7 +542,7 @@ export function setupShutdown(cleanup: () => void, caffeinatePid: number | null)
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
-    console.error("[grass] unhandledRejection — process kept alive:", reason);
+    console.error("[gitbot] unhandledRejection — process kept alive:", reason);
   });
 }
 
