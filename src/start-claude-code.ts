@@ -20,6 +20,14 @@ import { buildJarvisTools, JARVIS_MCP_NAME, JARVIS_TOOL_NAMES } from "./jarvis-t
 
 // Where Jarvis's project checkouts live; set once by the server at startup.
 let workspaceCwd = process.cwd();
+
+/**
+ * The model every Claude Code session runs unless a bot names its own. Jarvis
+ * and its project agents both reason about whole repositories, so the default
+ * is the strongest model rather than the cheapest.
+ */
+const DEFAULT_MODEL = "claude-opus-5";
+
 export function setWorkspaceCwd(cwd: string): void { workspaceCwd = cwd; }
 
 export async function initAgent(): Promise<boolean> {
@@ -92,7 +100,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
     const q = query({
       prompt: promptParam,
       options: {
-        model: store.model ?? "claude-sonnet-4-6",
+        model: store.model ?? DEFAULT_MODEL,
         permissionMode: store.mode === "plan" ? "plan" : "default",
         abortController,
         includePartialMessages: true,
