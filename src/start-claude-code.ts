@@ -25,8 +25,13 @@ let workspaceCwd = process.cwd();
  * The model every Claude Code session runs unless a bot names its own. Jarvis
  * and its project agents both reason about whole repositories, so the default
  * is the strongest model rather than the cheapest.
+ *
+ * The [1m] suffix is what the agent SDK reads to budget a 1M-token context
+ * instead of 200K; it asks for the long-context beta and is stripped before
+ * the request reaches the API. Long sessions in a large checkout then run
+ * much further before compaction, at the cost of burning rate limits faster.
  */
-const DEFAULT_MODEL = "claude-opus-5";
+const DEFAULT_MODEL = "claude-opus-5[1m]";
 
 export function setWorkspaceCwd(cwd: string): void { workspaceCwd = cwd; }
 

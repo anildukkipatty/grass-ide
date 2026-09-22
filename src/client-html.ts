@@ -2119,7 +2119,7 @@ export const html = `<!DOCTYPE html>
 
     var model = field("Model", "optional", el("input"));
     model.value = bot ? (bot.model || "") : "";
-    model.placeholder = "claude-opus-5";
+    model.placeholder = "claude-opus-5[1m]";
 
     var permissionMode = field("Permissions", null, el("select"));
     [["ask-permissions", "Ask before each tool"], ["auto-approve", "Auto-approve tools"], ["plan", "Plan only (no edits)"]]
