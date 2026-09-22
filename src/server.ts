@@ -32,6 +32,7 @@ import { initAgent as initOpencode, runAgent as runOpencode, listSessions as lis
 import { initAgent as initCodex, runAgent as runCodex, listSessions as listCodexSessions, loadTranscript as loadCodexTranscript } from "./start-codex";
 import { startRelayMode } from "./relay-client";
 import { handleBotRoutes } from "./bot-routes";
+import { handleDictationRoutes } from "./dictation";
 import { getBot, getThread, botNeedsSetup, createThread } from "./bot-store";
 import { setWorkspaceCwd } from "./start-claude-code";
 import { beginThreadTurn, activeTurns, TurnBusyError } from "./turns";
@@ -68,6 +69,9 @@ export async function handleRequest(
 
     // Bot hub: /bots and /threads
     if (await handleBotRoutes(req, res, workspaceCwd)) return;
+
+    // Voice input: /dictate and /dictate/status
+    if (await handleDictationRoutes(req, res)) return;
 
     // --- Jarvis ---
 

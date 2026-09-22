@@ -144,6 +144,28 @@ Close your browser tab. Your phone dies. The WiFi drops. It doesn't matter — y
 
 When the agent wants to do something that needs approval (run a bash command, edit a file, fetch a URL), you'll see a permission prompt right in the chat UI. You approve or deny from your phone. You stay in control.
 
+### Dictation
+
+Both message boxes have a mic button: tap to record, tap again to stop. The clip is transcribed with Deepgram (`nova-2`) and then cleaned up by `gpt-4o-mini` — filler words dropped, self-corrections resolved ("5, no, make it 6" becomes "6") — and the polished instruction lands in the box for you to review and send. Set `DEEPGRAM_API_KEY` and `OPENAI_API_KEY` to enable it — either exported in the shell or in an env file (see below). Browsers only allow microphone access over `https` or on `localhost`, so on a plain-`http` LAN address the button will report that; relay mode works from any device.
+
+### API keys and env files
+
+Jarvis reads keys from `process.env`, and on startup it also loads them from the first of these files that defines them — a real environment variable always wins:
+
+| Path | When to use it |
+|---|---|
+| `$JARVIS_ENV_FILE` | explicit override |
+| `./.env` | the directory you run `jarvis start` in |
+| `~/.config/jarvis/env` | machine-wide; written by `scripts/sandbox-setup.sh` |
+
+```sh
+# .env
+DEEPGRAM_API_KEY=...
+OPENAI_API_KEY=...
+```
+
+Usual format: `KEY=value` per line, `#` comments, optional quotes, a leading `export` is ignored. Each file that supplies a key is printed at startup. `.env` is gitignored — keep keys out of the repo.
+
 ### Ports and the relay
 
 `jarvis start` runs locally and binds port `3000` by default. Pass `-p <port>` to use a different one — handy when several instances run at once in different directories. Passing `-r <url>` (and no `-p`) switches to relay mode instead: the server dials out to the relay, defaulting to `wss://relay.codeongrass.com`, so the hub is reachable from outside your LAN. An explicit `-p` always wins over `-r`.
@@ -248,6 +270,13 @@ Jarvis's event stream carries three extra event types: `delegation` (`project`, 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/chat` | Start or continue a session. Body: `{ repoPath, agent, prompt, sessionId? }`. Returns `{ sessionId }` |
+
+### Dictation
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/dictate/status` | Returns `{ deepgram: boolean, openai: boolean }` — whether each key is set |
+| `POST` | `/dictate` | Transcribe and clean up a voice clip. Body: `{ audio: <base64>, mimeType }`. Returns `{ text }` |
 
 ### Streaming Events
 

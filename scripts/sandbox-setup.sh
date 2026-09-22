@@ -55,6 +55,8 @@ mkdir -p "$JARVIS_CONFIG_DIR"
 cat > "$JARVIS_ENV_FILE" <<EOF
 # jarvis sandbox environment
 # Add secrets here (e.g. ANTHROPIC_API_KEY, GITHUB_TOKEN).
+# DEEPGRAM_API_KEY and OPENAI_API_KEY enable voice dictation in the UI.
+# jarvis loads this file on startup, so no need to source it.
 # This file is readable only by $WORKSPACE_USER.
 # jarvis-api will append secrets here during provisioning.
 

@@ -382,6 +382,19 @@ export const html = `<!DOCTYPE html>
   .btn:disabled { opacity: .45; cursor: default; }
   .send.stop { background: var(--danger); }
   .send.stop::before { content: ""; width: 11px; height: 11px; border-radius: 2px; background: currentColor; }
+  .mic {
+    width: 36px; height: 36px; border-radius: 11px; flex: none;
+    color: var(--muted); display: flex; align-items: center; justify-content: center;
+  }
+  .mic:hover { color: var(--text); background: var(--surface-2); }
+  .mic svg { width: 18px; height: 18px; fill: currentColor; }
+  .mic.recording { color: var(--accent-text); background: var(--danger); animation: pulse 1.2s ease-in-out infinite; }
+  .mic.busy { color: var(--faint); cursor: default; }
+  .mic.busy svg { display: none; }
+  .mic.busy::before { content: ""; width: 14px; height: 14px; border-radius: 50%;
+    border: 1.5px solid var(--border); border-top-color: var(--accent); animation: spin .7s linear infinite; }
+  @keyframes pulse { 50% { opacity: .6; } }
+  @media (prefers-reduced-motion: reduce) { .mic.recording { animation: none; } }
 
   /* --- Modal --- */
   .backdrop {
@@ -483,6 +496,7 @@ export const html = `<!DOCTYPE html>
       <h2 id="ask-title">What do you need?</h2>
       <div class="box">
         <textarea id="ask-input" rows="1" placeholder="Ask about any project, or hand over some work…"></textarea>
+        <button class="mic" id="ask-mic" title="Dictate" aria-label="Dictate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v5a4 4 0 0 0 4 4zm6-4a6 6 0 0 1-5 5.92V20h3v2H8v-2h3v-3.08A6 6 0 0 1 6 11h2a4 4 0 0 0 8 0h2z"/></svg></button>
         <button class="send" id="ask-send" title="Send" aria-label="Send">&uarr;</button>
       </div>
       <div class="hints" id="hints"></div>
@@ -550,6 +564,7 @@ export const html = `<!DOCTYPE html>
     <div class="activity" id="activity"></div>
     <div class="box">
       <textarea id="input" rows="1" placeholder="Message…"></textarea>
+      <button class="mic" id="mic" title="Dictate" aria-label="Dictate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v5a4 4 0 0 0 4 4zm6-4a6 6 0 0 1-5 5.92V20h3v2H8v-2h3v-3.08A6 6 0 0 1 6 11h2a4 4 0 0 0 8 0h2z"/></svg></button>
       <button class="send" id="send" title="Send" aria-label="Send">&uarr;</button>
     </div>
   </div></div>
@@ -1820,6 +1835,91 @@ export const html = `<!DOCTYPE html>
     return bot;
   }
 
+  // --- Dictation ---
+  // Tap to record, tap again to stop. The clip goes to /dictate, which returns
+  // the cleaned-up instruction; that lands in the textarea for review, never
+  // the raw transcript. One recording at a time across both boxes.
+  var recording = null;   // { btn, recorder, chunks, stream }
+
+  function recordingMime() {
+    var types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+    for (var i = 0; i < types.length; i++) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported(types[i])) return types[i];
+    }
+    return "";
+  }
+
+  function insertDictation(textarea, text) {
+    if (!text) { toast("Didn't catch that"); return; }
+    var cur = textarea.value;
+    textarea.value = cur && !/\s$/.test(cur) ? cur + " " + text : cur + text;
+    textarea.dispatchEvent(new Event("input"));   // resize + any review hooks
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result).split(",")[1] || ""); };
+      r.onerror = function () { reject(r.error); };
+      r.readAsDataURL(blob);
+    });
+  }
+
+  function stopRecording() {
+    var rec = recording;
+    if (!rec) return;
+    recording = null;
+    rec.btn.classList.remove("recording");
+    rec.btn.classList.add("busy");
+    rec.recorder.stop();
+    rec.stream.getTracks().forEach(function (t) { t.stop(); });
+  }
+
+  function startRecording(btn, textarea) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      toast("Dictation isn't supported in this browser"); return;
+    }
+    if (!window.isSecureContext) {
+      toast("Dictation needs https or localhost"); return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      var mime = recordingMime();
+      var recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      var chunks = [];
+      recorder.ondataavailable = function (ev) { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      recorder.onstop = function () {
+        var type = (recorder.mimeType || mime || "audio/webm").split(";")[0];
+        var blob = new Blob(chunks, { type: type });
+        if (blob.size < 1000) { btn.classList.remove("busy"); return; }   // tapped twice by accident
+        blobToBase64(blob).then(function (audio) {
+          return api("/dictate", { method: "POST", body: { audio: audio, mimeType: type } });
+        }).then(function (d) {
+          insertDictation(textarea, d.text);
+        }).catch(function (err) {
+          toast(err.message || "Dictation failed");
+        }).then(function () {
+          btn.classList.remove("busy");
+        });
+      };
+      recorder.start();
+      recording = { btn: btn, recorder: recorder, chunks: chunks, stream: stream };
+      btn.classList.add("recording");
+    }).catch(function (err) {
+      toast(err && err.name === "NotAllowedError" ? "Microphone access was denied" : "Couldn't start the microphone");
+    });
+  }
+
+  function wireMic(btn, textarea) {
+    btn.onclick = function () {
+      if (btn.classList.contains("busy")) return;
+      if (recording && recording.btn === btn) { stopRecording(); return; }
+      if (recording) stopRecording();
+      startRecording(btn, textarea);
+    };
+  }
+
   function toast(text) {
     var old = document.querySelector(".toast");
     if (old) old.remove();
@@ -2118,6 +2218,8 @@ export const html = `<!DOCTYPE html>
     if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); askJarvis(ask.value); }
   });
   $("send").onclick = function () { if (state === "idle") send(); else abort(); };
+  wireMic($("ask-mic"), $("ask-input"));
+  wireMic($("mic"), $("input"));
 
   var input = $("input");
   input.addEventListener("input", function () {

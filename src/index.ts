@@ -6,7 +6,13 @@ process.on("SIGINT", () => {
 });
 
 import { Command } from "commander";
+import { loadEnvFiles } from "./env-file";
 import { start } from "./server";
+
+// Before anything reads process.env: .env in the working directory and
+// ~/.config/jarvis/env supply API keys (Deepgram, OpenAI) without exporting
+// them by hand. A real environment variable always wins over the file.
+const envFiles = loadEnvFiles();
 
 const program = new Command();
 
@@ -31,6 +37,7 @@ program
       console.error("  --port must be a number");
       process.exit(1);
     }
+    for (const file of envFiles) console.log(`  env:  ${file}`);
     const local = opts.local || port !== undefined;
     await start("local", port, opts.caffeinate ?? false, local ? undefined : opts.relay);
   });

@@ -1,7 +1,7 @@
 {
-  "name": "jarvis-ai",
-  "version": "0.0.3",
-  "description": "Jarvis \u2014 a persistent AI engineering partner. One entry point from any device; project-aware handoff and delegation to Claude Code running on your machine.",
+  "name": "jarvis-hq",
+  "version": "0.0.5",
+  "description": "Jarvis — a persistent AI engineering partner. One entry point from any device; project-aware handoff and delegation to Claude Code running on your machine.",
   "main": "dist/index.js",
   "bin": {
     "jarvis": "dist/index.js"
@@ -11,7 +11,7 @@
     "skills"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
     "prepublishOnly": "npm run build"
   },
