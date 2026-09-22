@@ -1,10 +1,10 @@
 {
-  "name": "gitbot-ai",
+  "name": "jarvis-ai",
   "version": "0.0.3",
-  "description": "Run Claude Code, Codex, or OpenCode from any device on your network — a local server that puts an AI coding agent in your browser, with reusable bots, threads, and per-bot setup instructions.",
+  "description": "Jarvis \u2014 a persistent AI engineering partner. One entry point from any device; project-aware handoff and delegation to Claude Code running on your machine.",
   "main": "dist/index.js",
   "bin": {
-    "gitbot": "dist/index.js"
+    "jarvis": "dist/index.js"
   },
   "files": [
     "dist",
@@ -16,6 +16,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
+    "jarvis",
     "claude",
     "codex",
     "opencode",
@@ -23,8 +24,7 @@
     "agent",
     "cli",
     "coding-agent",
-    "bot",
-    "websocket"
+    "engineering-partner"
   ],
   "repository": {
     "type": "git",

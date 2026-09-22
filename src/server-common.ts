@@ -248,6 +248,8 @@ export interface SessionStore {
   // Bot hub: the thread this session belongs to, and the preset driving it.
   threadId?: string;
   botPreset?: BotPreset;
+  /** No push on completion: set on turns whose result reaches the user another way. */
+  silent?: boolean;
 }
 
 /** The parts of a bot that shape the agent run. Mirrors fields on Bot in bot-store. */
@@ -261,6 +263,8 @@ export interface BotPreset {
   setupInstructions?: string;
   /** True while this run is the machine-preparation run rather than the bot's job. */
   setup?: boolean;
+  /** True for the Jarvis bot: the run gets Jarvis's project and dispatch tools. */
+  jarvis?: boolean;
 }
 
 export const sessions = new Map<string, SessionStore>();
@@ -339,7 +343,7 @@ export function notifyNewPermission(toolName: string): void {
   if (permissionsEmitter.listenerCount("update") === 0) {
     sendPushViaRelay(
       "Permission required",
-      `gitbot wants to use ${toolName}. Tap to review.`,
+      `Jarvis wants to use ${toolName}. Tap to review.`,
       { type: "permission" }
     );
   } else {
@@ -349,7 +353,7 @@ export function notifyNewPermission(toolName: string): void {
       if (buildPermissionsDump().length > 0) {
         sendPushViaRelay(
           "Permission required",
-          `gitbot wants to use ${toolName}. Tap to review.`,
+          `Jarvis wants to use ${toolName}. Tap to review.`,
           { type: "permission" }
         );
       }
@@ -358,11 +362,23 @@ export function notifyNewPermission(toolName: string): void {
 }
 
 export function notifySessionDone(store: SessionStore): void {
+  // A turn Jarvis is waiting on reports through Jarvis, not on its own.
+  if (store.silent) return;
   const repoName = store.repoPath.split("/").filter(Boolean).pop() ?? store.repoPath;
-  const send = () => sendPushViaRelay(
-    "Task complete",
-    `gitbot finished working on ${repoName}. Tap to see the response.`,
-    { type: "task_complete", sessionId: store.gitbotId }
+  let title = "Task complete";
+  let body = `Jarvis finished working on ${repoName}. Tap to see the response.`;
+  if (store.threadId) {
+    // Lazy: bot-store is a leaf module, but keep the import out of the hot path.
+    const { getThread, getBot } = require("./bot-store") as typeof import("./bot-store");
+    const thread = getThread(store.threadId);
+    const bot = thread && getBot(thread.botId);
+    if (thread && bot) {
+      title = bot.name;
+      body = `${thread.title} \u2014 done. Tap to see the result.`;
+    }
+  }
+  const send = () => sendPushViaRelay(title, body,
+    { type: "task_complete", sessionId: store.gitbotId, ...(store.threadId ? { threadId: store.threadId } : {}) }
   );
 
   if (store.emitter.listenerCount("event") === 0) {
@@ -420,14 +436,16 @@ export function emitEvent(store: SessionStore, type: string, data: Record<string
 
 
 /**
- * Where the relay token lives for a workspace. `.grass-relay-token` is the
- * pre-rename name: keep honouring it when it is the only one present, so an
- * upgrade doesn't hand the relay a brand-new identity.
+ * Where the relay token lives for a workspace. `.gitbot-relay-token` and
+ * `.grass-relay-token` are the pre-rename names: keep honouring one when it is
+ * the only one present, so an upgrade doesn't hand the relay a brand-new identity.
  */
 export function relayTokenPath(cwd: string): string {
-  const current = join(cwd, ".gitbot-relay-token");
-  const legacy = join(cwd, ".grass-relay-token");
-  if (!existsSync(current) && existsSync(legacy)) return legacy;
+  const current = join(cwd, ".jarvis-relay-token");
+  if (existsSync(current)) return current;
+  for (const legacy of [join(cwd, ".gitbot-relay-token"), join(cwd, ".grass-relay-token")]) {
+    if (existsSync(legacy)) return legacy;
+  }
   return current;
 }
 
@@ -486,7 +504,7 @@ export async function createHttpServer(opts: {
       console.log(`  port: ${PORT} (auto-selected from ${PORT_RANGE_START}–${PORT_RANGE_END})`);
     } catch {
       console.error(`\n  No available port found in range ${PORT_RANGE_START}–${PORT_RANGE_END}.`);
-      console.error(`  Try stopping other gitbot sessions, or run with -p to specify a port.\n`);
+      console.error(`  Try stopping other jarvis sessions, or run with -p to specify a port.\n`);
       process.exit(1);
     }
   }
@@ -510,7 +528,7 @@ export async function createHttpServer(opts: {
       if (opts.portOverride !== undefined) {
         console.error(`  Please choose a different port with -p, or run without -p to auto-select one.\n`);
       } else {
-        console.error(`  Try stopping other gitbot sessions, or run with -p to specify a port.\n`);
+        console.error(`  Try stopping other jarvis sessions, or run with -p to specify a port.\n`);
       }
       process.exit(1);
     }
@@ -542,7 +560,7 @@ export function setupShutdown(cleanup: () => void, caffeinatePid: number | null)
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
-    console.error("[gitbot] unhandledRejection — process kept alive:", reason);
+    console.error("[jarvis] unhandledRejection — process kept alive:", reason);
   });
 }
 

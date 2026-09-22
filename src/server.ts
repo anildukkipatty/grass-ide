@@ -26,15 +26,16 @@ import {
   IRequest,
   IResponse,
   type PermissionMode,
-  type BotPreset,
 } from "./server-common";
 import { initAgent as initClaudeCode, runAgent as runClaudeCode, listSessions as listClaudeSessions, loadTranscript } from "./start-claude-code";
 import { initAgent as initOpencode, runAgent as runOpencode, listSessions as listOpencodeSessions, getSessionHistory, abortSession as opencodeAbort, respondPermission as opencodePermission } from "./start-opencode";
 import { initAgent as initCodex, runAgent as runCodex, listSessions as listCodexSessions, loadTranscript as loadCodexTranscript } from "./start-codex";
 import { startRelayMode } from "./relay-client";
 import { handleBotRoutes } from "./bot-routes";
-import { getBot, getThread, touchThread, botNeedsSetup } from "./bot-store";
-import { botPermissionToSession } from "./server-common";
+import { getBot, getThread, botNeedsSetup, createThread } from "./bot-store";
+import { setWorkspaceCwd } from "./start-claude-code";
+import { beginThreadTurn, activeTurns, TurnBusyError } from "./turns";
+import { ensureJarvisBot, syncProjectBots, listProjects, jarvisDir } from "./jarvis";
 
 export async function handleRequest(
   req: IRequest,
@@ -67,6 +68,36 @@ export async function handleRequest(
 
     // Bot hub: /bots and /threads
     if (await handleBotRoutes(req, res, workspaceCwd)) return;
+
+    // --- Jarvis ---
+
+    // GET /jarvis — the entry point: Jarvis's bot and the projects it knows.
+    if (method === "GET" && path === "/jarvis") {
+      const bot = ensureJarvisBot();
+      jsonOk(res, { bot, dir: jarvisDir(), projects: listProjects() });
+      return;
+    }
+
+    // POST /jarvis/ask — a fresh Jarvis conversation from the home screen: opens
+    // a thread and sends the first message in one round trip.
+    if (method === "POST" && path === "/jarvis/ask") {
+      const body = await readBody(req);
+      const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+      if (!prompt) { jsonError(res, 400, "prompt is required"); return; }
+      if (!availableAgents.includes("claude-code")) { jsonError(res, 400, "Agent 'claude-code' is not available"); return; }
+      const bot = ensureJarvisBot();
+      const thread = createThread(bot.id, bot.repoPath ?? jarvisDir());
+      const { store } = beginThreadTurn(thread, bot, { prompt });
+      jsonOk(res, { thread: getThread(thread.id) ?? thread, sessionId: store.gitbotId });
+      return;
+    }
+
+    // GET /sessions/active — threads with a turn in flight, so a client that
+    // was closed while work ran can rejoin it.
+    if (method === "GET" && path === "/sessions/active") {
+      jsonOk(res, { active: activeTurns() });
+      return;
+    }
 
     // GET /sessions
     if (method === "GET" && path === "/sessions") {
@@ -231,46 +262,44 @@ export async function handleRequest(
     // POST /chat
     if (method === "POST" && path === "/chat") {
       const body = await readBody(req);
-      let { repoPath, agent, sessionId: existingId, model, permissionMode } = body;
+      const { repoPath, agent, sessionId: existingId, model, permissionMode, mode } = body;
       const { prompt, attachments, threadId } = body;
-      let { mode } = body;
       // attachments: Array<{ url: string }> | undefined
 
-      // A threadId comes from the bot hub: it supplies the repo, the resume handle
-      // and the bot preset, so the client need not repeat them.
-      let botPreset: BotPreset | undefined;
+      // A threadId comes from the bot hub: the thread supplies the folder, the
+      // resume handle and the bot preset, so the client need not repeat them.
       if (threadId) {
         const thread = getThread(threadId);
         if (!thread) { jsonError(res, 404, "Thread not found"); return; }
         const bot = getBot(thread.botId);
         if (!bot) { jsonError(res, 404, "Bot not found"); return; }
-        repoPath = thread.repoPath;
-        agent = "claude-code";
-        existingId = thread.sdkSessionId ?? undefined;
-        model = model ?? bot.model;
-        // Bot presets speak their own vocabulary ("auto-approve", "plan"); the
-        // session speaks PermissionMode. Translate, or nothing auto-approves.
-        const botPermission = botPermissionToSession(bot.permissionMode);
-        permissionMode = permissionMode ?? botPermission.permissionMode;
-        mode = mode ?? botPermission.mode;
-        const isSetup = thread.kind === "setup";
+        if (!availableAgents.includes("claude-code")) { jsonError(res, 400, "Agent 'claude-code' is not available"); return; }
+        if (!prompt && (!attachments || attachments.length === 0)) {
+          jsonError(res, 400, "prompt or attachments is required"); return;
+        }
         // Work waits on setup; the setup thread itself is exempt, since it is
         // the thing that clears the block.
-        if (!isSetup && botNeedsSetup(bot)) {
+        if (thread.kind !== "setup" && botNeedsSetup(bot)) {
           jsonError(res, 409, `${bot.name} still needs to set up this machine`, {
             setupRequired: true,
             setupThreadId: bot.setupThreadId,
           });
           return;
         }
-        botPreset = {
-          id: bot.id,
-          name: bot.name,
-          instructions: bot.instructions,
-          allowedTools: bot.allowedTools,
-          disallowedTools: bot.disallowedTools,
-          ...(isSetup ? { setup: true, setupInstructions: bot.setupInstructions } : {}),
-        };
+        try {
+          const { store } = beginThreadTurn(thread, bot, {
+            prompt: prompt ?? "",
+            attachments,
+            model,
+            permissionMode: permissionMode as PermissionMode | undefined,
+            mode,
+          });
+          jsonOk(res, { sessionId: store.gitbotId });
+        } catch (err: any) {
+          if (err instanceof TurnBusyError) jsonError(res, 409, err.message);
+          else throw err;
+        }
+        return;
       }
 
       if (!repoPath) { jsonError(res, 400, "repoPath is required"); return; }
@@ -303,11 +332,10 @@ export async function handleRequest(
         if (model) store.model = model;
         if (mode) store.mode = mode;
         if (permissionMode) store.permissionMode = permissionMode as PermissionMode;
-        if (threadId) { store.threadId = threadId; store.botPreset = botPreset; }
         emitEvent(store, 'user_prompt', { prompt: prompt ?? '', ...(attachments?.length ? { attachments } : {}) });
       } else {
         const gitbotId = existingId ?? randomUUID();
-        store = createSession(gitbotId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined, { threadId, preset: botPreset });
+        store = createSession(gitbotId, agent, repoPath, model, mode, permissionMode as PermissionMode | undefined);
         if (existingId) {
           store.sdkSessionId = existingId;
         }
@@ -316,7 +344,6 @@ export async function handleRequest(
       }
 
       const s = store;
-      if (threadId) touchThread(threadId, prompt ?? '');
       notifySessionStarted();
       if (agent === "claude-code") {
         runClaudeCode(s).catch((err) => {
@@ -449,14 +476,25 @@ export async function handleRequest(
 
 export async function start(network: string = "local", portOverride?: number, caffeinate: boolean = false, relayUrl?: string) {
   const workspaceCwd = process.cwd();
-  console.log(`gitbot — starting workspace server in ${workspaceCwd}`);
+  console.log(`jarvis — starting in ${workspaceCwd}`);
 
   // Claude Code refuses to spawn inside another Claude Code session, which would
   // otherwise surface only as an opaque "exited with code 1" on the first message.
   if (process.env.CLAUDECODE) {
     console.warn(`  warning: CLAUDECODE is set — this shell is inside a Claude Code session.`);
-    console.warn(`  The claude-code agent will refuse to start. Run gitbot from a plain terminal,`);
-    console.warn(`  or launch it with: env -u CLAUDECODE gitbot start -p <port>`);
+    console.warn(`  The claude-code agent will refuse to start. Run jarvis from a plain terminal,`);
+    console.warn(`  or launch it with: env -u CLAUDECODE jarvis start -p <port>`);
+  }
+
+  setWorkspaceCwd(workspaceCwd);
+  // Jarvis's world exists before anyone speaks to it: its directory, its bot,
+  // and a bot per known project.
+  try {
+    const jarvis = ensureJarvisBot();
+    syncProjectBots();
+    console.log(`  jarvis: ${jarvisDir()} (${listProjects().length} projects, bot ${jarvis.id.slice(0, 8)})`);
+  } catch (err: any) {
+    console.warn(`  jarvis: could not initialise — ${err?.message ?? err}`);
   }
 
   const claudeAvailable = await initClaudeCode();
@@ -480,7 +518,7 @@ export async function start(network: string = "local", portOverride?: number, ca
     portOverride,
     caffeinate,
     network,
-    label: "gitbot server",
+    label: "jarvis server",
   });
 
   server.on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {

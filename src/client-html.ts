@@ -3,7 +3,7 @@ export const html = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>gitbot — bot hub</title>
+<title>Jarvis</title>
 <style>
   :root {
     --bg: #f7f7f9;
@@ -257,6 +257,34 @@ export const html = `<!DOCTYPE html>
   .thread:hover .kill { opacity: 1; }
   .thread .kill:hover { color: var(--danger); background: var(--surface-2); }
 
+  /* --- Jarvis: the front door. One question, then whatever is going on. --- */
+  .ask { padding: 40px 0 8px; }
+  .ask h2 { font-size: 26px; margin-bottom: 16px; letter-spacing: -.02em; }
+  .ask .box { box-shadow: var(--shadow-md); }
+  .ask .box textarea { min-height: 52px; font-size: 16px; }
+  .hints { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .hint {
+    font-size: 13px; color: var(--muted); padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface);
+  }
+  .hint:hover { color: var(--text); border-color: var(--faint); }
+  .thread .who {
+    display: inline-block; font-size: 11.5px; font-weight: 600; margin-right: 6px;
+    color: hsl(var(--bot-hue) var(--tint-s) var(--ink-l)); vertical-align: 1px;
+  }
+  .lead { color: var(--muted); font-size: 14px; margin: 0 0 8px; }
+
+  /* Work Jarvis sent elsewhere: a card in its transcript that opens the thread. */
+  .dispatch {
+    display: flex; align-items: center; gap: 12px; margin-top: 7px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 13px;
+    padding: 10px 14px; box-shadow: var(--shadow-sm);
+  }
+  .dispatch .body { flex: 1; min-width: 0; }
+  .dispatch .hd { font-size: 12px; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; }
+  .dispatch .ttl { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dispatch .dot { font-size: 12px; color: var(--faint); flex: none; }
+
   .empty { text-align: center; padding: 64px 20px; color: var(--muted); }
   .empty .big { font-size: 40px; margin-bottom: 12px; }
   .empty h3 { font-size: 17px; margin-bottom: 6px; }
@@ -444,10 +472,32 @@ export const html = `<!DOCTYPE html>
 </head>
 <body>
 
-<!-- Home: the roster -->
-<section class="view active" id="view-home">
+<!-- Jarvis: where every interaction starts -->
+<section class="view active" id="view-jarvis">
+  <div class="bar"><div class="wrap narrow bar-inner">
+    <h1>Jarvis</h1>
+    <button class="btn ghost" id="to-projects">Projects</button>
+  </div></div>
+  <div class="scroll"><div class="wrap narrow">
+    <div class="ask">
+      <h2 id="ask-title">What do you need?</h2>
+      <div class="box">
+        <textarea id="ask-input" rows="1" placeholder="Ask about any project, or hand over some work…"></textarea>
+        <button class="send" id="ask-send" title="Send" aria-label="Send">&uarr;</button>
+      </div>
+      <div class="hints" id="hints"></div>
+    </div>
+    <div class="section-head"><h3>Recent</h3></div>
+    <div id="recent-lead"></div>
+    <div class="threads" id="recent"></div>
+  </div></div>
+</section>
+
+<!-- Projects and bots: the roster -->
+<section class="view" id="view-home">
   <div class="bar"><div class="wrap bar-inner">
-    <h1>Your bots</h1>
+    <button class="back" id="to-jarvis"><span class="chev">&lsaquo;</span> Jarvis</button>
+    <h1>Projects &amp; bots</h1>
     <button class="btn ghost" id="import-bot">Import</button>
     <button class="btn primary" id="new-bot"><span>+</span> New bot</button>
   </div></div>
@@ -515,7 +565,12 @@ export const html = `<!DOCTYPE html>
   var threads = [];           // threads of the open bot
   var activeBot = null;
   var activeThread = null;
-  var view = "home";          // home | bot | thread
+  var view = "jarvis";        // jarvis | home | bot | thread
+  var jarvis = null;          // the Jarvis bot, from /jarvis
+  var projects = [];
+  // Where the thread screen's back button goes: the bot page, or straight
+  // back to Jarvis when the thread was reached from there.
+  var threadBack = "bot";
 
   var sessionId = null;
   var stream = null;
@@ -620,7 +675,7 @@ export const html = `<!DOCTYPE html>
   // --- Navigation: depth, not columns ---
   function setView(next, push) {
     view = next;
-    ["home", "bot", "thread"].forEach(function (v) {
+    ["jarvis", "home", "bot", "thread"].forEach(function (v) {
       $("view-" + v).classList.toggle("active", v === next);
     });
     if (push !== false) {
@@ -629,8 +684,9 @@ export const html = `<!DOCTYPE html>
   }
 
   window.addEventListener("popstate", function () {
-    if (view === "thread") goBotView(false);
+    if (view === "thread") { if (threadBack === "jarvis") goJarvis(false); else goBotView(false); }
     else if (view === "bot") goHome(false);
+    else if (view === "home") goJarvis(false);
   });
 
   function goHome(push) {
@@ -639,6 +695,122 @@ export const html = `<!DOCTYPE html>
     detach();
     setView("home", push);
     return loadRoster();
+  }
+
+  // --- Jarvis home ---
+  function goJarvis(push) {
+    activeBot = null;
+    activeThread = null;
+    detach();
+    setView("jarvis", push);
+    return loadRecent();
+  }
+
+  function loadRecent() {
+    return pruneLive().then(function () {
+      return Promise.all([api("/jarvis"), api("/bots"), api("/threads")]);
+    }).then(function (r) {
+      jarvis = r[0].bot || null;
+      projects = r[0].projects || [];
+      bots = r[1].bots || [];
+      allThreads = r[2].threads || [];
+      renderHints();
+      renderRecent();
+    });
+  }
+
+  var HINTS = [
+    "What changed across my projects this week?",
+    "What's the latest commit on ",
+    "Review the latest PR on "
+  ];
+
+  function renderHints() {
+    var box = $("hints");
+    box.innerHTML = "";
+    HINTS.forEach(function (h) {
+      var b = el("button", "hint", h.replace(/ $/, "\u2026"));
+      b.onclick = function () {
+        var input = $("ask-input");
+        input.value = h;
+        input.focus();
+        // A hint that ends in a space wants a project name; one that does not is
+        // a whole question.
+        if (!/ $/.test(h)) askJarvis(h);
+      };
+      box.appendChild(b);
+    });
+  }
+
+  function botById(id) {
+    for (var i = 0; i < bots.length; i++) if (bots[i].id === id) return bots[i];
+    return null;
+  }
+
+  function renderRecent() {
+    var list = $("recent");
+    var lead = $("recent-lead");
+    list.innerHTML = "";
+    lead.innerHTML = "";
+
+    if (!projects.length) {
+      lead.appendChild(el("p", "lead", "Jarvis doesn\u2019t know any projects yet. Tell it about one \u2014 \u201cadd my repo github.com/you/thing, call it Thing\u201d \u2014 or just ask about it and it will ask for the repo."));
+    }
+
+    var rows = allThreads.filter(function (t) { return t.kind !== "setup"; }).slice(0, 30);
+    if (!rows.length) return;
+
+    rows.forEach(function (t) {
+      var bot = botById(t.botId) || { name: "?", id: t.botId };
+      var row = tint(el("div", "thread"), bot);
+      var body = el("div", "body");
+      var title = el("div", "title");
+      title.appendChild(el("span", "who", bot.name));
+      title.appendChild(document.createTextNode(t.title));
+      body.appendChild(title);
+      body.appendChild(el("div", "prev", t.preview || "No messages yet"));
+      row.appendChild(body);
+      var meta = el("div", "meta");
+      if (live[t.id]) meta.appendChild(el("span", "dot live", "running"));
+      else meta.appendChild(el("div", null, relTime(t.updatedAt)));
+      row.appendChild(meta);
+      row.onclick = function () { openFromJarvis(t); };
+      list.appendChild(row);
+    });
+  }
+
+  /** Opens any thread straight from the Jarvis screen; back returns here. */
+  function openFromJarvis(thread) {
+    var bot = botById(thread.botId);
+    if (!bot) { toast("That thread\u2019s bot is gone"); return Promise.resolve(); }
+    activeBot = bot;
+    threads = [];
+    threadBack = "jarvis";
+    return openThread(thread);
+  }
+
+  /** A fresh conversation with Jarvis: the server opens the thread and sends
+   *  the first message in one go; we land in the thread and follow along. */
+  function askJarvis(text) {
+    text = (text || "").trim();
+    if (!text) return;
+    var input = $("ask-input");
+    var btn = $("ask-send");
+    btn.disabled = true;
+    api("/jarvis/ask", { method: "POST", body: { prompt: text } })
+      .then(function (d) {
+        input.value = "";
+        input.style.height = "auto";
+        if (!jarvis) jarvis = botById(d.thread.botId);
+        activeBot = jarvis || botById(d.thread.botId);
+        threads = [];
+        threadBack = "jarvis";
+        live[d.thread.id] = d.sessionId;
+        allThreads.unshift(d.thread);
+        return openThread(d.thread);
+      })
+      .catch(function (err) { toast(err && err.message ? err.message : String(err)); })
+      .then(function () { btn.disabled = false; });
   }
 
   function goBotView(push) {
@@ -681,6 +853,8 @@ export const html = `<!DOCTYPE html>
     grid.style.display = "";
 
     bots.forEach(function (bot) {
+      // Jarvis has its own front door; it is not one of the roster.
+      if (bot.role === "jarvis") return;
       var mine = allThreads.filter(function (t) { return t.botId === bot.id; });
       var card = tint(el("button", "card"), bot);
       card.appendChild(avatar(bot));
@@ -720,6 +894,7 @@ export const html = `<!DOCTYPE html>
   function openBot(bot) {
     activeBot = bot;
     activeThread = null;
+    threadBack = "bot";
     detach();
     $("bot-name").textContent = bot.name;
     var av = $("bot-avatar");
@@ -1093,7 +1268,7 @@ export const html = `<!DOCTYPE html>
     $("thread-title").textContent = thread.title;
     $("thread-sub").textContent = shortPath(thread.repoPath, 30);
     $("thread-sub").title = thread.repoPath || "";
-    $("to-bot-label").textContent = activeBot ? activeBot.name : "Back";
+    $("to-bot-label").textContent = threadBack === "jarvis" ? "Jarvis" : (activeBot ? activeBot.name : "Back");
     var av = $("thread-avatar");
     av.textContent = activeBot ? (activeBot.emoji || "\\u{1F916}") : "\\u{1F916}";
     tint(av, activeBot || {});
@@ -1207,7 +1382,8 @@ export const html = `<!DOCTYPE html>
 
   function appendTool(content, name, input) {
     var chip = el("div", "tool");
-    chip.appendChild(el("b", null, name));
+    // Jarvis's own tools read better without the MCP plumbing in the name.
+    chip.appendChild(el("b", null, name.replace(/^mcp__jarvis__/, "")));
     var summary = typeof input === "string" ? input : JSON.stringify(input || {});
     chip.appendChild(el("span", null, summary.slice(0, 200)));
     content.appendChild(chip);
@@ -1334,7 +1510,8 @@ export const html = `<!DOCTYPE html>
   }
 
   // Every event type the agent emits on the turn stream.
-  var STREAM_EVENTS = ["user_prompt", "assistant", "tool_use", "status", "permission_request", "aborted", "done", "result", "error"];
+  var STREAM_EVENTS = ["user_prompt", "assistant", "tool_use", "status", "permission_request", "aborted", "done", "result", "error",
+                       "delegation", "handoff", "project_created"];
 
   function attachStream(sid, onEvent) {
     closeStream();
@@ -1371,7 +1548,7 @@ export const html = `<!DOCTYPE html>
       case "status":
         if (state === "aborting") break;
         if (data.status === "thinking") setActivity("Thinking\u2026");
-        else if (data.status === "tool") setActivity("Running " + (data.tool_name || "tool") + "\u2026");
+        else if (data.status === "tool") setActivity("Running " + (data.tool_name || "tool").replace(/^mcp__jarvis__/, "") + "\u2026");
         else if (data.status === "tool_summary" && data.summary) setActivity(data.summary);
         break;
 
@@ -1380,6 +1557,25 @@ export const html = `<!DOCTYPE html>
         pendingPerms++;
         setActivity("Waiting for your approval\u2026");
         renderPermission(data);
+        break;
+
+      case "delegation":
+        renderDispatch(data, "Delegated to " + (data.project ? data.project.name : "project"));
+        break;
+
+      case "handoff":
+        renderDispatch(data, "Handed off to " + (data.project ? data.project.name : "project"));
+        // Live, the conversation moves with the work; on a replay the card is
+        // enough, since the user chose to look at Jarvis's side of it.
+        if (!replay) followHandoff(data);
+        break;
+
+      case "project_created":
+        if (data.project) {
+          $("messages-inner").appendChild(el("div", "note", "New project: " + data.project.name));
+          projects.push(data.project);
+          scrollDown();
+        }
         break;
 
       case "aborted":
@@ -1406,6 +1602,60 @@ export const html = `<!DOCTYPE html>
         }
         break;
     }
+  }
+
+  /** A card for work Jarvis sent to a project: one per thread, updated in place
+   *  as the status changes, opening the thread on tap. */
+  function renderDispatch(data, label) {
+    var id = "dispatch-" + data.threadId;
+    var card = document.getElementById(id);
+    if (!card) {
+      if (!liveBubble) liveBubble = startMessage("assistant");
+      card = el("div", "dispatch");
+      card.id = id;
+      var body = el("div", "body");
+      body.appendChild(el("div", "hd", label));
+      body.appendChild(el("div", "ttl", data.title || "Working\u2026"));
+      card.appendChild(body);
+      card.appendChild(el("span", "dot", ""));
+      var open = el("button", "btn", "Open");
+      open.onclick = function () { openDispatched(data); };
+      card.appendChild(open);
+      liveBubble.appendChild(card);
+    }
+    var dot = card.querySelector(".dot");
+    var status = data.status || "running";
+    dot.className = "dot" + (status === "running" ? " live" : "");
+    dot.textContent = status === "running" ? "running" : status === "done" ? "done" : "failed";
+    if (status === "running") live[data.threadId] = data.sessionId; else delete live[data.threadId];
+    scrollDown();
+  }
+
+  /** Opens the project thread behind a dispatch card; back returns to Jarvis. */
+  function openDispatched(data) {
+    return Promise.all([
+      api("/bots/" + encodeURIComponent(data.botId)),
+      api("/threads/" + encodeURIComponent(data.threadId))
+    ]).then(function (r) {
+      replaceBot(r[0].bot);
+      if (!botById(r[0].bot.id)) bots.push(r[0].bot);
+      activeBot = r[0].bot;
+      threads = [];
+      threadBack = "jarvis";
+      return openThread(r[1].thread);
+    }).catch(function (err) { toast(err && err.message ? err.message : String(err)); });
+  }
+
+  /** The moment Jarvis hands off, the user is in the project. Jarvis's own turn
+   *  finishes on its own in the background. */
+  function followHandoff(data) {
+    var from = activeThread;
+    setActivity("Moving to " + (data.project ? data.project.name : "the project") + "\u2026");
+    live[data.threadId] = data.sessionId;
+    setTimeout(function () {
+      if (activeThread !== from) return;   // the user already went elsewhere
+      openDispatched(data);
+    }, 600);
   }
 
   function renderPermission(data) {
@@ -1452,12 +1702,17 @@ export const html = `<!DOCTYPE html>
    *  keep claiming to be running forever. */
   function pruneLive() {
     var ids = Object.keys(live);
-    if (!ids.length) return Promise.resolve();
     return Promise.all(ids.map(function (threadId) {
       return api("/sessions/" + encodeURIComponent(live[threadId]) + "/status")
         .then(function (d) { if (!d.streaming) delete live[threadId]; })
         .catch(function () { delete live[threadId]; });
-    }));
+    })).then(function () {
+      // Turns started elsewhere \u2014 by Jarvis, or from another device \u2014 are
+      // running too; the server is the one place that knows all of them.
+      return api("/sessions/active").then(function (d) {
+        (d.active || []).forEach(function (a) { live[a.threadId] = a.sessionId; });
+      }).catch(function () {});
+    });
   }
 
   /** Leaves a running turn alone server-side, but stops following it here. */
@@ -1495,10 +1750,10 @@ export const html = `<!DOCTYPE html>
   // A bot is portable: everything that defines its behaviour travels, and
   // nothing that is local to one machine does. repoPath is deliberately left
   // behind — the folder a bot works in is the receiver's to choose.
-  var SHARE_PREFIX = "gitbot:v1:";
-  // "grassbot:v1:" is the pre-rename prefix. Codes already in circulation carry
-  // it, so import still accepts it; export only ever writes the current one.
-  var LEGACY_SHARE_PREFIXES = ["grassbot:v1:"];
+  var SHARE_PREFIX = "jarvis:v1:";
+  // Pre-rename prefixes. Codes already in circulation carry them, so import
+  // still accepts them; export only ever writes the current one.
+  var LEGACY_SHARE_PREFIXES = ["gitbot:v1:", "grassbot:v1:"];
   // setupStatus and setupThreadId stay behind with repoPath: they describe this
   // machine, not the bot. The receiving machine works out its own.
   var SHARE_FIELDS = ["name", "emoji", "description", "instructions", "setupInstructions",
@@ -1603,7 +1858,7 @@ export const html = `<!DOCTYPE html>
   /** Shown only when the clipboard is unavailable: the code, ready to copy by hand. */
   function openShareModal(bot, code) {
     var parts = modalShell("Share " + bot.name);
-    parts.modal.appendChild(el("p", "picker-note", "Copying was blocked by the browser. Copy this code and paste it into another gitbot."));
+    parts.modal.appendChild(el("p", "picker-note", "Copying was blocked by the browser. Copy this code and paste it into another Jarvis."));
     var box = el("textarea", "code");
     box.value = code;
     box.readOnly = true;
@@ -1850,7 +2105,18 @@ export const html = `<!DOCTYPE html>
   $("edit-bot").onclick = function () { if (activeBot) openBotModal(activeBot); };
   $("new-thread").onclick = newThread;
   $("to-home").onclick = function () { goHome(); };
-  $("to-bot").onclick = function () { goBotView(); };
+  $("to-jarvis").onclick = function () { goJarvis(); };
+  $("to-projects").onclick = function () { goHome(); };
+  $("to-bot").onclick = function () { if (threadBack === "jarvis") goJarvis(); else goBotView(); };
+  $("ask-send").onclick = function () { askJarvis($("ask-input").value); };
+  var ask = $("ask-input");
+  ask.addEventListener("input", function () {
+    ask.style.height = "auto";
+    ask.style.height = Math.min(ask.scrollHeight, 200) + "px";
+  });
+  ask.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); askJarvis(ask.value); }
+  });
   $("send").onclick = function () { if (state === "idle") send(); else abort(); };
 
   var input = $("input");
@@ -1862,8 +2128,8 @@ export const html = `<!DOCTYPE html>
     if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); if (state === "idle") send(); }
   });
 
-  setView("home", false);
-  loadRoster().catch(function (err) { console.error(err); });
+  setView("jarvis", false);
+  loadRecent().catch(function (err) { console.error(err); });
 })();
 </script>
 </body>

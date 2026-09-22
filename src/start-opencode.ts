@@ -75,7 +75,7 @@ async function getClientForDir(directory: string): Promise<any> {
   }
 
   startEventStream(client, directory).catch((err) => {
-    console.error("[gitbot] startEventStream crashed:", err);
+    console.error("[jarvis] startEventStream crashed:", err);
   });
   return client;
 }

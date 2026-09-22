@@ -32,6 +32,14 @@ export interface Bot {
   permissionMode: "ask-permissions" | "auto-approve" | "plan";
   allowedTools?: string[];
   disallowedTools?: string[];
+  /**
+   * Jarvis roles. "jarvis" is the single top-level partner that owns the
+   * engineering world; "project" is the agent for one project, created and
+   * kept in step by Jarvis. Absent on ordinary hand-made bots.
+   */
+  role?: "jarvis" | "project";
+  /** For a project bot: the slug of its project file under ~/jarvis/projects. */
+  projectSlug?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,23 +64,27 @@ export interface Thread {
 export type NewBot = Partial<Bot> & Pick<Bot, "name">;
 
 // --- Storage ---
-// Two JSON files under ~/.gitbot. Small collections, read fully and written atomically.
+// Two JSON files under ~/.jarvis. Small collections, read fully and written atomically.
 // All access goes through this module so the backing store can be swapped later.
 
-// ~/.grass is the pre-rename location: keep using it when it exists and the new
-// directory does not, so an upgrade doesn't orphan someone's bots and threads.
+// ~/.gitbot and ~/.grass are the pre-rename locations: keep using one when it
+// exists and the new directory does not, so an upgrade doesn't orphan someone's
+// bots and threads.
 function resolveDataDir(): string {
+  if (process.env.JARVIS_DATA_DIR) return process.env.JARVIS_DATA_DIR;
   if (process.env.GITBOT_DATA_DIR) return process.env.GITBOT_DATA_DIR;
   if (process.env.GRASS_DATA_DIR) return process.env.GRASS_DATA_DIR;
-  const current = join(homedir(), ".gitbot");
-  const legacy = join(homedir(), ".grass");
-  if (!existsSync(current) && existsSync(legacy)) return legacy;
+  const current = join(homedir(), ".jarvis");
+  if (existsSync(current)) return current;
+  for (const legacy of [join(homedir(), ".gitbot"), join(homedir(), ".grass")]) {
+    if (existsSync(legacy)) return legacy;
+  }
   return current;
 }
 
 const DATA_DIR = resolveDataDir();
 
-/** The resolved gitbot data directory, shared by other modules that persist state. */
+/** The resolved data directory, shared by other modules that persist state. */
 export function dataDir(): string {
   return DATA_DIR;
 }
@@ -125,6 +137,8 @@ export function createBot(input: NewBot): Bot {
     permissionMode: input.permissionMode ?? "ask-permissions",
     allowedTools: input.allowedTools,
     disallowedTools: input.disallowedTools,
+    role: input.role,
+    projectSlug: input.projectSlug,
     createdAt: ts,
     updatedAt: ts,
   };

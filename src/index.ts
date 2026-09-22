@@ -11,13 +11,13 @@ import { start } from "./server";
 const program = new Command();
 
 program
-  .name("gitbot")
-  .description("gitbot — build and run AI bots on top of Claude Code and other coding agents")
+  .name("jarvis")
+  .description("Jarvis — a persistent AI engineering partner on top of Claude Code and other coding agents")
   .version(require("../package.json").version);
 
 program
   .command("start")
-  .description("Start the bot hub — create bots, pick a repo, and run them in threads")
+  .description("Start Jarvis — the hub you talk to from any device")
   .option("-c, --caffeinate", "run caffeinate for 8 hours to prevent sleep")
   .option("-p, --port <port>", "bind this local port and serve the UI at http://localhost:<port> (implies --local)", "3000")
   .option("-l, --local", "bind a local port instead of connecting to the relay")

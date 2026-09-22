@@ -1,14 +1,10 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="gitbot" width="500" />
+# Jarvis
 
-[![npm version](https://img.shields.io/npm/v/gitbot-ai)](https://www.npmjs.com/package/gitbot-ai)
+**A persistent AI engineering partner. Talk to it from anywhere; it puts coding agents to work on your machine.**
 
-# gitbot
-
-**Build your bots. Run them on your machine. Talk to them from anywhere.**
-
-Run one command. Scan a QR code. Create bots with their own instructions, setup steps and permissions — then put them to work in your local project directories from any device.
+Run one command. Scan a QR code. Say what you need — Jarvis works out which project it concerns, hands the work to a Claude Code agent in that project's checkout, and you come back when it's done.
 
 ---
 
@@ -16,39 +12,72 @@ Run one command. Scan a QR code. Create bots with their own instructions, setup 
 
 </div>
 
-## What is gitbot?
+## What is Jarvis?
 
-gitbot is a **bot creation and running program** built on top of Claude Code and other coding harnesses (Opencode, Codex).
+Jarvis is a **persistent engineering partner** built on top of Claude Code and other coding harnesses (Opencode, Codex). Underneath it is a bot hub:
 
 A *bot* is a named, reusable agent you define once: a job description that is appended to the harness's own system prompt, an emoji and a name, setup instructions for what it needs on a machine, a default repo, a model, and a permission mode. Once a bot exists, you give it work in *threads* — each thread is a live agent session scoped to a folder, and a bot can have as many as you want.
 
-gitbot spins up a local server that serves the bot hub UI and bridges every thread to a real agent session on your machine — one that reads your files, writes code, and runs commands. The hub runs in your browser, on any device on your network. Your phone, your tablet, whatever.
+Jarvis spins up a local server that serves the bot hub UI and bridges every thread to a real agent session on your machine — one that reads your files, writes code, and runs commands. The hub runs in your browser, on any device on your network. Your phone, your tablet, whatever.
 
 ```
 You on the couch          Your laptop
-  (phone browser)  <--->  (gitbot server)
+  (phone browser)  <--->  (jarvis server)
        WiFi                bots → threads → Claude Code / Opencode / Codex
                            running in your local project directories
 ```
 
 No copy-pasting. Just scan and go.
 
+## Jarvis
+
+Jarvis is the front door. Instead of picking a bot and a folder, you open the hub and say what you need:
+
+> What's the latest commit on Grass? · Review Madan's latest PR · Did we ever build the MCP feature in Zap Eve? Check it's ready for tomorrow's demo.
+
+Jarvis works out which **project** the request concerns and how the work should happen:
+
+- **Handoff** — the conversation moves into the project. Its agent (Claude Code, running in the project's checkout) answers you directly, and your follow-ups ("why did we do that?", "review it properly", "fix it, but don't merge") stay there with full context.
+- **Delegate** — Jarvis gives one or more project agents a bounded task, waits for their reports, and answers you itself. Used for cross-project questions and anything Jarvis needs to combine.
+
+Work runs on the machine where `jarvis start` is running, so you can close your phone and come back: the **Recent** list on the Jarvis screen shows every thread across projects, with the ones still running marked live, and opening one rejoins it.
+
+### Projects
+
+A project is an engineering context, not just a repo. Each one is a Markdown file under `~/jarvis/projects/<slug>.md`:
+
+```markdown
+---
+name: Grass
+path: /Users/you/projects/grass
+repo: https://github.com/you/grass
+---
+# Grass
+People, useful commands, architecture notes, previous work — whatever helps.
+```
+
+Jarvis reads these, keeps them up to date as it learns, and creates one when you mention a project it doesn't know: it will offer an unclaimed folder in the workspace if one matches, or ask for the repo URL and clone it. `~/jarvis/CLAUDE.md` holds what Jarvis should always know about you (standing rules, people). Set `JARVIS_DIR` to move the directory.
+
+Under the hood, Jarvis and every project are bots in the hub — so threads, resume, transcripts and the Projects & bots page all work as before. Jarvis runs with its own in-process tools (`list_projects`, `read_project`, `create_project`, `update_project`, `delegate`, `handoff`) and without a shell of its own; project agents run in `auto-approve` mode so dispatched work does not stall waiting for taps. Neither merges, pushes to a shared branch or deletes anything unless you asked for it in the conversation.
+
+Run `jarvis start` from the directory that holds your checkouts (e.g. `~/projects`) — that is where new projects are cloned.
+
 ## Installation
 
 ```bash
-npm install -g gitbot-ai
+npm install -g jarvis-ai
 ```
 
-That's it. `gitbot` is now available everywhere.
+That's it. `jarvis` is now available everywhere.
 
 > [!NOTE]
-> gitbot requires **Node.js 18+**. The Claude Code agent requires the `claude` CLI to be installed and authenticated on your machine. The Opencode agent requires the `@opencode-ai/sdk` package. The Codex agent requires the `codex` CLI.
+> Jarvis requires **Node.js 18+**. The Claude Code agent requires the `claude` CLI to be installed and authenticated on your machine. The Opencode agent requires the `@opencode-ai/sdk` package. The Codex agent requires the `codex` CLI.
 
 ### Build from source
 
 ```bash
 git clone https://github.com/anildukkipatty/grass-ide.git
-cd grass-ide/cli
+cd grass-ide/cli   # branch: jarvis
 
 npm install
 npm run build
@@ -62,14 +91,14 @@ npm install -g .
 # Navigate to a workspace directory (parent of your repos, or a specific project)
 cd ~/projects
 
-# Start the bot hub
-gitbot start -p 3000
+# Start Jarvis
+jarvis start -p 3000
 ```
 
 That's it. You'll see something like:
 
 ```
-gitbot — starting workspace server in /Users/you/projects
+jarvis — starting in /Users/you/projects
   available agents: claude-code, opencode, codex
   workspace: /Users/you/projects
   port: 3000 (specified)
@@ -85,27 +114,27 @@ gitbot — starting workspace server in /Users/you/projects
   Scan to open on your phone
 ```
 
-Open the URL or scan the QR code. From the hub, create a bot (or pick one of the presets), let it run its setup thread once on this machine, then open a thread against a folder and start prompting.
+Open the URL or scan the QR code. You land on the Jarvis screen: ask about any project, or hand over some work. The Projects page underneath still lets you make hand-crafted bots with their own instructions and setup steps.
 
 ## How It Works
 
-gitbot runs a single HTTP server that handles everything:
+Jarvis runs a single HTTP server that handles everything:
 
 1. **Serves the bot hub UI** — A full-featured React app, embedded directly in the binary. No separate frontend to deploy.
 2. **Stores your bots** — Bots and their threads live in a JSON store under your home directory, so they survive restarts and are shared by every workspace on the machine.
-3. **Manages a workspace** — gitbot treats the directory where you run `gitbot start` as a workspace. It can list the subdirectories as repos, browse their file trees, read files, and clone new repos into the workspace.
+3. **Manages a workspace** — Jarvis treats the directory where you run `jarvis start` as a workspace. It can list the subdirectories as repos, browse their file trees, read files, and clone new repos into the workspace.
 4. **Bridges bots to harnesses** — Each thread creates a real agent session via the Claude Agent SDK (Claude Code), the Opencode SDK, or the Codex CLI, with the bot's instructions appended to the harness's own system prompt. The agent sees your project files, can edit code, run commands — everything it normally does.
 5. **Streams events to the UI** — Agent output is delivered via Server-Sent Events (SSE), so the UI receives a live stream of assistant messages, tool calls, permission requests, and status updates.
 
-By default the connection is local: your prompts go from your browser, over your WiFi, to the gitbot server on your machine. Nothing leaves your network (except the agent's own API calls to Anthropic or its configured provider). Pass `--relay` instead and the server dials out to a relay so you can reach it from outside your LAN.
+By default the connection is local: your prompts go from your browser, over your WiFi, to the Jarvis server on your machine. Nothing leaves your network (except the agent's own API calls to Anthropic or its configured provider). Pass `--relay` instead and the server dials out to a relay so you can reach it from outside your LAN.
 
 ### Bots carry their own setup
 
-A bot can declare what it needs from a machine — "ffmpeg must be on PATH", "run `npm install` in the repo". The first time that bot lands on a machine, gitbot opens a **setup thread** and lets the bot prepare the machine itself, once. Until that setup is marked complete, the bot will not accept work threads. Setup travels with the bot definition, so a bot shared with someone else knows how to set itself up on their machine too.
+A bot can declare what it needs from a machine — "ffmpeg must be on PATH", "run `npm install` in the repo". The first time that bot lands on a machine, Jarvis opens a **setup thread** and lets the bot prepare the machine itself, once. Until that setup is marked complete, the bot will not accept work threads. Setup travels with the bot definition, so a bot shared with someone else knows how to set itself up on their machine too.
 
 ### Threads are where the work happens
 
-A thread belongs to one bot and runs in one folder — the folder you pick, else the bot's default repo, else the directory you started gitbot in. Threads are listed, renamed, rejoined and deleted from the hub, and their messages are read back from the harness's own transcript on disk rather than duplicated into gitbot's store.
+A thread belongs to one bot and runs in one folder — the folder you pick, else the bot's default repo, else the directory you started Jarvis in. Threads are listed, renamed, rejoined and deleted from the hub, and their messages are read back from the harness's own transcript on disk rather than duplicated into Jarvis's store.
 
 ### Sessions are persistent
 
@@ -117,18 +146,18 @@ When the agent wants to do something that needs approval (run a bash command, ed
 
 ### Ports and the relay
 
-`gitbot start` runs locally and binds port `3000` by default. Pass `-p <port>` to use a different one — handy when several instances run at once in different directories. Passing `-r <url>` (and no `-p`) switches to relay mode instead: the server dials out to the relay, defaulting to `wss://relay.codeongrass.com`, so the hub is reachable from outside your LAN. An explicit `-p` always wins over `-r`.
+`jarvis start` runs locally and binds port `3000` by default. Pass `-p <port>` to use a different one — handy when several instances run at once in different directories. Passing `-r <url>` (and no `-p`) switches to relay mode instead: the server dials out to the relay, defaulting to `wss://relay.codeongrass.com`, so the hub is reachable from outside your LAN. An explicit `-p` always wins over `-r`.
 
 ---
 
 ## Commands
 
-### `gitbot start`
+### `jarvis start`
 
-The only command. Starts the bot hub — an HTTP server with SSE event streaming.
+The only command. Starts Jarvis — an HTTP server with SSE event streaming.
 
 ```bash
-gitbot start [options]
+jarvis start [options]
 ```
 
 | Flag | Description |
@@ -142,26 +171,26 @@ gitbot start [options]
 
 ```bash
 # Default — local server on port 3000, great for a phone on the same WiFi
-gitbot start
+jarvis start
 
 # A different local port
-gitbot start -p 4000
+jarvis start -p 4000
 
 # Relay mode — reachable from outside your LAN
-gitbot start --relay wss://relay.codeongrass.com
+jarvis start --relay wss://relay.codeongrass.com
 
 # Point at your own relay
-gitbot start --relay wss://relay.example.com
+jarvis start --relay wss://relay.example.com
 
 # Keep your Mac awake while your bots work
-gitbot start -p 3000 --caffeinate
+jarvis start -p 3000 --caffeinate
 ```
 
 ---
 
 ## API Reference
 
-gitbot exposes a REST + SSE API. All endpoints return JSON unless noted.
+Jarvis exposes a REST + SSE API. All endpoints return JSON unless noted.
 
 ### Workspace & Infrastructure
 
@@ -176,6 +205,16 @@ gitbot exposes a REST + SSE API. All endpoints return JSON unless noted.
 | `GET` | `/dir?repoPath=<path>&path=<subpath>` | List directory entries (files and folders) within a repo. Path is validated to stay inside `repoPath`. |
 | `GET` | `/file?repoPath=<path>&path=<filePath>` | Read a file. Path is validated to stay inside `repoPath`. 5 MB max. |
 | `GET` | `/diffs?repoPath=<path>` | Returns `git diff HEAD` output for a repo as `{ diff }` |
+
+### Jarvis
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/jarvis` | Jarvis's bot, its directory, and the known projects |
+| `POST` | `/jarvis/ask` | Start a fresh Jarvis conversation. Body: `{ prompt }`. Returns `{ thread, sessionId }` |
+| `GET` | `/sessions/active` | Threads with a turn in flight, as `{ active: { threadId, sessionId }[] }` — for rejoining after a reload |
+
+Jarvis's event stream carries three extra event types: `delegation` (`project`, `botId`, `threadId`, `sessionId`, `title`, `status`), `handoff` (same fields, no status — the client moves to that thread) and `project_created` (`project`).
 
 ### Bots & Threads
 
@@ -262,7 +301,7 @@ Each permission entry includes `sessionId`, `agent`, `repoPath`, `repoName`, `to
            │ HTTP + SSE
            │ (local port, or via relay)
 ┌──────────▼──────────────────┐
-│  gitbot Server              │
+│  Jarvis Server              │
 │  ─ bot + thread store       │
 │  ─ workspace management     │
 │  ─ session management       │
@@ -280,7 +319,7 @@ Each permission entry includes `sessionId`, `agent`, `repoPath`, `repoName`, `to
 
 ### Transport: SSE instead of WebSocket
 
-gitbot uses **Server-Sent Events (SSE)** for streaming, not WebSockets. The client sends requests via regular HTTP POST and receives the response stream via a GET `/events` connection. This means:
+Jarvis uses **Server-Sent Events (SSE)** for streaming, not WebSockets. The client sends requests via regular HTTP POST and receives the response stream via a GET `/events` connection. This means:
 
 - Standard HTTP — works through proxies and most network configurations
 - The `Last-Event-ID` header lets clients reconnect and replay any buffered events they missed
@@ -298,11 +337,11 @@ Sessions are the core abstraction. A session is created when a `/chat` POST is r
 
 ### Multi-Agent Support
 
-gitbot detects which harnesses are available at startup by checking for the `claude` CLI, the `@opencode-ai/sdk` package, and the `codex` CLI. It reports the available agents at `/agents`. A bot's `model` and `permissionMode` are applied to whichever harness runs its threads.
+Jarvis detects which harnesses are available at startup by checking for the `claude` CLI, the `@opencode-ai/sdk` package, and the `codex` CLI. It reports the available agents at `/agents`. A bot's `model` and `permissionMode` are applied to whichever harness runs its threads.
 
 **Claude Code** (`claude-code`): Uses the `@anthropic-ai/claude-agent-sdk` `query()` function. Runs the `claude-opus-4-6` model in `default` permission mode. Supports `canUseTool` for per-tool permission prompts. Session transcripts are stored at `~/.claude/projects/<cwd>/<session-id>.jsonl`.
 
-**Opencode** (`opencode`): Uses the `@opencode-ai/sdk`. gitbot spawns an Opencode server process at startup (or connects to one already running on port 4096). Per-directory clients are maintained so sessions can be scoped to different repos simultaneously. Events are received via a persistent Opencode event stream (`client.event.subscribe()`). If the stream fails, it reconnects automatically after 2 seconds.
+**Opencode** (`opencode`): Uses the `@opencode-ai/sdk`. Jarvis spawns an Opencode server process at startup (or connects to one already running on port 4096). Per-directory clients are maintained so sessions can be scoped to different repos simultaneously. Events are received via a persistent Opencode event stream (`client.event.subscribe()`). If the stream fails, it reconnects automatically after 2 seconds.
 
 ### Repo Details
 
@@ -318,7 +357,7 @@ gitbot detects which harnesses are available at startup by checking for the `cla
 
 ### Session Titles
 
-When listing Claude Code sessions, gitbot first looks for a `custom-title` entry in the session's `.jsonl` transcript. If found, that title is used as the session preview. Otherwise, it collects text from the first few user and assistant messages to build a ~80-character preview string.
+When listing Claude Code sessions, Jarvis first looks for a `custom-title` entry in the session's `.jsonl` transcript. If found, that title is used as the session preview. Otherwise, it collects text from the first few user and assistant messages to build a ~80-character preview string.
 
 ### Chat UI Features
 
@@ -352,6 +391,9 @@ cli/
 │   ├── workspace.ts       # Repo listing, file browser, git details, clone
 │   ├── bot-store.ts       # Bot + thread persistence (JSON store)
 │   ├── bot-routes.ts      # REST surface for /bots and /threads
+│   ├── jarvis.ts          # Jarvis directory, project files, Jarvis/project bots and prompts
+│   ├── jarvis-tools.ts    # Jarvis's in-process tools: projects, delegate, handoff
+│   ├── turns.ts           # Start a turn on a thread (shared by /chat and Jarvis)
 │   ├── relay-client.ts    # Relay mode transport
 │   └── client-html.ts     # Embedded React bot hub UI
 ├── dist/                  # Compiled output (CommonJS)
@@ -387,12 +429,12 @@ npm run build
 ./dist/index.js start -p 3000
 ```
 
-The working directory where you run `gitbot start` is treated as the workspace root. Repos are the subdirectories of that workspace. You can run gitbot from any directory — the hub lets you pick the folder a thread runs in. Bots themselves are stored per-machine, not per-workspace.
+The working directory where you run `jarvis start` is treated as the workspace root. Repos are the subdirectories of that workspace. You can run Jarvis from any directory — the hub lets you pick the folder a thread runs in. Bots themselves are stored per-machine, not per-workspace.
 
 ## Security Considerations
 
 > [!IMPORTANT]
-> gitbot has **no authentication**. Anyone who can reach the gitbot port on your network can run your bots on your machine, browse your project files, and read file contents. Bots can be given `auto-approve` permission mode, in which case they act without asking you first.
+> Jarvis has **no authentication**. Anyone who can reach the Jarvis port on your network can run your bots on your machine, browse your project files, and read file contents. Bots can be given `auto-approve` permission mode, in which case they act without asking you first.
 >
 > Use local mode on trusted networks only. Relay mode exposes the hub beyond your LAN — only use it if you accept that.
 

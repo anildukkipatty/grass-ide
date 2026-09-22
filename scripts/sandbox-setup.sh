@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# gitbot Sandbox Setup Script
+# jarvis Sandbox Setup Script
 # Idempotent — safe to run on every sandbox reboot.
 # =============================================================================
 
@@ -23,74 +23,74 @@ HOME_DIR=$(getent passwd "$WORKSPACE_USER" | cut -d: -f6)
 echo "Running setup as: $WORKSPACE_USER (home: $HOME_DIR)"
 
 # --- Paths -------------------------------------------------------------------
-GITBOT_WORKSPACE="$HOME_DIR/start"
-GITBOT_CONFIG_DIR="$HOME_DIR/.config/gitbot"
-GITBOT_ENV_FILE="$GITBOT_CONFIG_DIR/env"
-GITBOT_PORT=3000
-GITBOT_LOG="$GITBOT_CONFIG_DIR/gitbot.log"
+JARVIS_WORKSPACE="$HOME_DIR/start"
+JARVIS_CONFIG_DIR="$HOME_DIR/.config/jarvis"
+JARVIS_ENV_FILE="$JARVIS_CONFIG_DIR/env"
+JARVIS_PORT=3000
+JARVIS_LOG="$JARVIS_CONFIG_DIR/jarvis.log"
 RELAY_URL="wss://relay.codeongrass.com"
 
 # --- Create workspace folder -------------------------------------------------
 echo ""
-echo "==> Creating workspace folder: $GITBOT_WORKSPACE"
-mkdir -p "$GITBOT_WORKSPACE"
+echo "==> Creating workspace folder: $JARVIS_WORKSPACE"
+mkdir -p "$JARVIS_WORKSPACE"
 
-# --- Install gitbot -----------------------------------------------------------
+# --- Install jarvis -----------------------------------------------------------
 echo ""
-echo "==> Installing gitbot-ai globally"
-if ! gitbot -V &>/dev/null; then
-  npm install -g gitbot-ai
-  if ! gitbot -V &>/dev/null; then
-    echo "ERROR: gitbot not found after install." >&2
+echo "==> Installing jarvis-ai globally"
+if ! jarvis -V &>/dev/null; then
+  npm install -g jarvis-ai
+  if ! jarvis -V &>/dev/null; then
+    echo "ERROR: jarvis not found after install." >&2
     exit 1
   fi
 fi
-echo "gitbot installed: $(gitbot -V)"
+echo "jarvis installed: $(jarvis -V)"
 
 # --- Create config directory and env file ------------------------------------
 echo ""
-echo "==> Writing environment file: $GITBOT_ENV_FILE"
-mkdir -p "$GITBOT_CONFIG_DIR"
+echo "==> Writing environment file: $JARVIS_ENV_FILE"
+mkdir -p "$JARVIS_CONFIG_DIR"
 
-cat > "$GITBOT_ENV_FILE" <<EOF
-# gitbot sandbox environment
+cat > "$JARVIS_ENV_FILE" <<EOF
+# jarvis sandbox environment
 # Add secrets here (e.g. ANTHROPIC_API_KEY, GITHUB_TOKEN).
 # This file is readable only by $WORKSPACE_USER.
-# gitbot-api will append secrets here during provisioning.
+# jarvis-api will append secrets here during provisioning.
 
-GITBOT_PORT=$GITBOT_PORT
-GITBOT_WORKSPACE=$GITBOT_WORKSPACE
+JARVIS_PORT=$JARVIS_PORT
+JARVIS_WORKSPACE=$JARVIS_WORKSPACE
 EOF
 
-chmod 600 "$GITBOT_ENV_FILE"
+chmod 600 "$JARVIS_ENV_FILE"
 echo "Env file written and locked to owner-read-only."
 
 # --- Register cron @reboot entry (idempotent) --------------------------------
 echo ""
 echo "==> Registering cron @reboot entry"
-(crontab -l 2>/dev/null | grep -Ev 'grass|gitbot' || true; echo "@reboot nohup bash -c \"cd '$GITBOT_WORKSPACE' && gitbot start -p $GITBOT_PORT -r $RELAY_URL\" >> $GITBOT_LOG 2>&1 &") | crontab -
+(crontab -l 2>/dev/null | grep -Ev 'grass|gitbot|jarvis' || true; echo "@reboot nohup bash -c \"cd '$JARVIS_WORKSPACE' && jarvis start -p $JARVIS_PORT -r $RELAY_URL\" >> $JARVIS_LOG 2>&1 &") | crontab -
 echo "Cron entry registered."
 
-# --- Kill any existing gitbot process and start fresh -------------------------
+# --- Kill any existing jarvis process and start fresh -------------------------
 echo ""
-echo "==> Starting gitbot"
-pkill -x gitbot 2>/dev/null || true
+echo "==> Starting jarvis"
+pkill -x jarvis 2>/dev/null || true; pkill -x gitbot 2>/dev/null || true
 pkill -x grass 2>/dev/null || true  # pre-rename binary, if still running
 sleep 1
-nohup bash -c "cd '$GITBOT_WORKSPACE' && gitbot start -p $GITBOT_PORT -r $RELAY_URL" >> "$GITBOT_LOG" 2>&1 &
-echo "gitbot started (pid $!)"
+nohup bash -c "cd '$JARVIS_WORKSPACE' && jarvis start -p $JARVIS_PORT -r $RELAY_URL" >> "$JARVIS_LOG" 2>&1 &
+echo "jarvis started (pid $!)"
 
 # --- Health check ------------------------------------------------------------
 echo ""
-echo "==> Waiting for gitbot to become healthy on port $GITBOT_PORT"
+echo "==> Waiting for jarvis to become healthy on port $JARVIS_PORT"
 MAX_ATTEMPTS=30
 ATTEMPT=0
-until curl -sf "http://localhost:$GITBOT_PORT/health" > /dev/null 2>&1; do
+until curl -sf "http://localhost:$JARVIS_PORT/health" > /dev/null 2>&1; do
   ATTEMPT=$((ATTEMPT + 1))
   if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
-    echo "ERROR: gitbot did not become healthy after ${MAX_ATTEMPTS} attempts." >&2
-    echo "Check logs at: $GITBOT_LOG" >&2
-    tail -n 50 "$GITBOT_LOG" >&2 || true
+    echo "ERROR: jarvis did not become healthy after ${MAX_ATTEMPTS} attempts." >&2
+    echo "Check logs at: $JARVIS_LOG" >&2
+    tail -n 50 "$JARVIS_LOG" >&2 || true
     exit 1
   fi
   echo "  Attempt $ATTEMPT/$MAX_ATTEMPTS — waiting..."
@@ -99,8 +99,8 @@ done
 
 echo ""
 echo "================================================================"
-echo "  gitbot sandbox setup complete."
-echo "  Logs:    $GITBOT_LOG"
-echo "  Env:     $GITBOT_ENV_FILE"
-echo "  Port:    $GITBOT_PORT"
+echo "  jarvis sandbox setup complete."
+echo "  Logs:    $JARVIS_LOG"
+echo "  Env:     $JARVIS_ENV_FILE"
+echo "  Port:    $JARVIS_PORT"
 echo "================================================================"

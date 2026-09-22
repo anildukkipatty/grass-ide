@@ -16,6 +16,11 @@ import {
   type SessionStore,
 } from "./server-common";
 import { bindSession, setSetupStatus } from "./bot-store";
+import { buildJarvisTools, JARVIS_MCP_NAME, JARVIS_TOOL_NAMES } from "./jarvis-tools";
+
+// Where Jarvis's project checkouts live; set once by the server at startup.
+let workspaceCwd = process.cwd();
+export function setWorkspaceCwd(cwd: string): void { workspaceCwd = cwd; }
 
 export async function initAgent(): Promise<boolean> {
   try {
@@ -68,9 +73,21 @@ export async function runAgent(store: SessionStore): Promise<void> {
     const preset = store.botPreset;
     const append = preset?.setup
       ? setupSystemPrompt(preset)
-      : preset?.instructions
-        ? botSystemPrompt(preset)
-        : undefined;
+      : preset?.jarvis
+        ? preset.instructions
+        : preset?.instructions
+          ? botSystemPrompt(preset)
+          : undefined;
+
+    // Jarvis gets its dispatch tools in-process. A delegated task can run for
+    // many minutes, well past the SDK's default close timeout for tool calls.
+    const jarvis = preset?.jarvis
+      ? {
+          mcpServers: { [JARVIS_MCP_NAME]: buildJarvisTools(store, workspaceCwd) },
+          allowedTools: [...JARVIS_TOOL_NAMES, ...(preset.allowedTools ?? [])],
+          env: { ...process.env, CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: String(6 * 60 * 60 * 1000) } as Record<string, string>,
+        }
+      : {};
 
     const q = query({
       prompt: promptParam,
@@ -92,6 +109,7 @@ export async function runAgent(store: SessionStore): Promise<void> {
           : {}),
         ...(preset?.allowedTools?.length ? { allowedTools: preset.allowedTools } : {}),
         ...(preset?.disallowedTools?.length ? { disallowedTools: preset.disallowedTools } : {}),
+        ...jarvis,
         ...(store.sdkSessionId ? { resume: store.sdkSessionId } : {}),
         canUseTool: (toolName, input, { signal, toolUseID }) => {
           return new Promise((resolve) => {
@@ -558,6 +576,17 @@ function formatToolInput(toolName: string, input: Record<string, unknown>): stri
       if (!Array.isArray(todos)) return JSON.stringify(input);
       return todos.map((t) => `[${t.status}] ${t.content}`).join(", ");
     }
+    case "mcp__jarvis__delegate":
+      return `${input.project}: ${input.task}`;
+    case "mcp__jarvis__handoff":
+      return `${input.project}: ${input.message}`;
+    case "mcp__jarvis__read_project":
+    case "mcp__jarvis__update_project":
+      return `${input.project}`;
+    case "mcp__jarvis__create_project":
+      return `${input.name}${input.repo ? ` from ${input.repo}` : input.path ? ` at ${input.path}` : ""}`;
+    case "mcp__jarvis__list_projects":
+      return "";
     default:
       return JSON.stringify(input);
   }
