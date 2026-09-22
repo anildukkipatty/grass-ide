@@ -15,8 +15,9 @@ import {
   shouldAutoApprove,
   type SessionStore,
 } from "./server-common";
-import { bindSession, setSetupStatus } from "./bot-store";
+import { bindSession, setSetupStatus, updateThread } from "./bot-store";
 import { buildJarvisTools, JARVIS_MCP_NAME, JARVIS_TOOL_NAMES } from "./jarvis-tools";
+import { contextUsage, tokensInContext } from "./context-window";
 
 // Where Jarvis's project checkouts live; set once by the server at startup.
 let workspaceCwd = process.cwd();
@@ -102,10 +103,14 @@ export async function runAgent(store: SessionStore): Promise<void> {
         }
       : {};
 
+    // Settle the model before the run rather than at the call, so the context
+    // meter can name it and size its window.
+    store.model = store.model ?? DEFAULT_MODEL;
+
     const q = query({
       prompt: promptParam,
       options: {
-        model: store.model ?? DEFAULT_MODEL,
+        model: store.model,
         permissionMode: store.mode === "plan" ? "plan" : "default",
         abortController,
         includePartialMessages: true,
@@ -164,6 +169,17 @@ export async function runAgent(store: SessionStore): Promise<void> {
         }
 
         if (msg.type === "result") receivedResult = true;
+
+        // The context meter: an assistant message reports what the request
+        // carried and what it wrote, which together are what the next request
+        // will resend. The result message knows the window the CLI budgeted.
+        if (msg.type === "assistant") {
+          const used = tokensInContext((msg as any).message?.usage);
+          if (used > 0) reportContext(store, used);
+        } else if (msg.type === "result") {
+          const window = (msg as any).modelUsage?.[store.model ?? ""]?.contextWindow;
+          reportContext(store, store.context?.used ?? 0, window, true);
+        }
 
         if (!modelLogged && msg.type === "assistant" && (msg as any).message?.model) {
           modelLogged = true;
@@ -603,4 +619,18 @@ function formatToolInput(toolName: string, input: Record<string, unknown>): stri
     default:
       return JSON.stringify(input);
   }
+}
+
+/**
+ * Publishes how full the window is: live to the open thread, and — once the
+ * turn ends — onto the thread itself, so reopening it days later still shows
+ * where the conversation stands rather than nothing until the next turn.
+ */
+function reportContext(store: SessionStore, used: number, window?: number, persist = false): void {
+  if (!used) return;
+  const next = contextUsage(used, store.model, window);
+  const changed = JSON.stringify(next) !== JSON.stringify(store.context);
+  store.context = next;
+  if (changed) emitEvent(store, "context", next as unknown as Record<string, unknown>);
+  if (persist && store.threadId) updateThread(store.threadId, { context: next });
 }

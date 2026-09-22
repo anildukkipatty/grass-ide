@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "fs";
 import { basename, join } from "path";
 import { homedir } from "os";
+import type { ContextUsage } from "./context-window";
 
 // --- Types ---
 
@@ -59,6 +60,8 @@ export interface Thread {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+  /** How full the model's context window was at the end of the last turn. */
+  context?: ContextUsage;
 }
 
 export type NewBot = Partial<Bot> & Pick<Bot, "name">;

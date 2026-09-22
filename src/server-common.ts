@@ -8,6 +8,7 @@ import qrcode from "qrcode-terminal";
 import { html } from "./client-html";
 import { vendorScripts } from "./client-vendor";
 import { listRepos, cloneRepo, createFolder, listDir, readFile, getRepoDetails, browseDirs } from "./workspace";
+import type { ContextUsage } from "./context-window";
 
 // --- Transport abstractions ---
 // These interfaces cover the exact surface area that route handlers use.
@@ -250,6 +251,8 @@ export interface SessionStore {
   botPreset?: BotPreset;
   /** No push on completion: set on turns whose result reaches the user another way. */
   silent?: boolean;
+  /** How full the context window is, as of the most recent assistant message. */
+  context?: ContextUsage;
 }
 
 /** The parts of a bot that shape the agent run. Mirrors fields on Bot in bot-store. */
@@ -513,7 +516,11 @@ export async function createHttpServer(opts: {
 
   // Serve the SPA for GET /
   server.on("request", (req, res) => {
-    if (req.method === "GET" && (req.url === "/" || req.url === "")) {
+    // Match on the path alone: the API listener skips the root, so a root URL
+    // carrying a query string ("/?v=2") would otherwise be answered by nobody
+    // and hang until the client gave up.
+    const path = (req.url ?? "/").split("?")[0];
+    if (req.method === "GET" && (path === "/" || path === "")) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       // Function replacement: the vendor bundles contain `$&`-style sequences
       // that a string replacement would interpret.

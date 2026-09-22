@@ -69,6 +69,16 @@ export const html = `<!DOCTYPE html>
   .bar-title { flex: 1; min-width: 0; }
   .bar-title h2 { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar-title .sub { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Context meter: how full the model's window is, in the thread's own header. */
+  .ctx { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 11px; color: var(--muted); }
+  .ctx-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .ctx-dots { display: flex; gap: 2px; flex: none; }
+  .ctx-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+  .ctx-dots i.on { background: var(--muted); }
+  .ctx-num { flex: none; font-variant-numeric: tabular-nums; }
+  /* Past three quarters full the meter stops being background detail. */
+  .ctx.full .ctx-dots i.on { background: var(--danger); }
+  .ctx.full .ctx-num { color: var(--danger); }
 
   .back {
     display: inline-flex; align-items: center; gap: 5px; flex: none;
@@ -557,6 +567,11 @@ export const html = `<!DOCTYPE html>
     <div class="bar-title">
       <h2 id="thread-title"></h2>
       <div class="sub" id="thread-sub"></div>
+      <div class="ctx" id="thread-ctx" hidden>
+        <span class="ctx-model" id="ctx-model"></span>
+        <span class="ctx-dots" id="ctx-dots"></span>
+        <span class="ctx-num" id="ctx-num"></span>
+      </div>
     </div>
   </div></div>
   <div class="messages" id="messages"><div class="wrap narrow" id="messages-inner"></div></div>
@@ -1276,6 +1291,39 @@ export const html = `<!DOCTYPE html>
     load(startPath);
   }
 
+  // --- Context meter ---
+  // What the model is carrying into its next turn, against what it can hold.
+  // Ten dots read at a glance on a phone; the exact numbers sit beside them and
+  // the full sentence is in the tooltip.
+
+  function fmtTokens(n) {
+    if (!n) return "0";
+    return n < 1000 ? String(n) : Math.round(n / 1000) + "k";
+  }
+
+  function renderContext(ctx) {
+    var box = $("thread-ctx");
+    if (!ctx || !ctx.used || !ctx.window) { box.hidden = true; return; }
+    var pct = Math.min(100, Math.round((ctx.used / ctx.window) * 100));
+    // "/1000k" already says the window is the long one, so the meter drops the
+    // "(1M context)" tail that would otherwise eat the line on a phone. Plain
+    // string work, not a regex: this file is a template literal, and its
+    // backslashes belong to the build, not to the browser.
+    var name = ctx.label || ctx.model || "";
+    var tail = name.indexOf(" (1M");
+    $("ctx-model").textContent = tail === -1 ? name : name.slice(0, tail);
+    $("ctx-num").textContent = fmtTokens(ctx.used) + "/" + fmtTokens(ctx.window) + " (" + pct + "%)";
+    var dots = $("ctx-dots");
+    dots.innerHTML = "";
+    var lit = Math.min(10, Math.max(1, Math.ceil(pct / 10)));
+    for (var i = 0; i < 10; i++) dots.appendChild(el("i", i < lit ? "on" : null));
+    box.className = "ctx" + (pct >= 75 ? " full" : "");
+    box.title = (ctx.label ? ctx.label + " \u2014 " : "")
+      + ctx.used.toLocaleString() + " of " + ctx.window.toLocaleString()
+      + " tokens in context (" + pct + "% used)";
+    box.hidden = false;
+  }
+
   // --- Thread ---
   function openThread(thread) {
     activeThread = thread;
@@ -1283,6 +1331,7 @@ export const html = `<!DOCTYPE html>
     $("thread-title").textContent = thread.title;
     $("thread-sub").textContent = shortPath(thread.repoPath, 30);
     $("thread-sub").title = thread.repoPath || "";
+    renderContext(thread.context);
     $("to-bot-label").textContent = threadBack === "jarvis" ? "Jarvis" : (activeBot ? activeBot.name : "Back");
     var av = $("thread-avatar");
     av.textContent = activeBot ? (activeBot.emoji || "\\u{1F916}") : "\\u{1F916}";
@@ -1526,7 +1575,7 @@ export const html = `<!DOCTYPE html>
 
   // Every event type the agent emits on the turn stream.
   var STREAM_EVENTS = ["user_prompt", "assistant", "tool_use", "status", "permission_request", "aborted", "done", "result", "error",
-                       "delegation", "handoff", "project_created"];
+                       "delegation", "handoff", "project_created", "context"];
 
   function attachStream(sid, onEvent) {
     closeStream();
@@ -1558,6 +1607,11 @@ export const html = `<!DOCTYPE html>
       case "tool_use":
         if (!liveBubble) liveBubble = startMessage("assistant");
         appendTool(liveBubble, data.tool_name, data.tool_input);
+        break;
+
+      case "context":
+        if (activeThread) activeThread.context = data;
+        renderContext(data);
         break;
 
       case "status":
