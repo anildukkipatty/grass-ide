@@ -484,6 +484,11 @@ export const html = `<!DOCTYPE html>
     box-shadow: var(--shadow-md); animation: rise .18s ease;
   }
   @keyframes rise { from { opacity: 0; transform: translate(-50%, 8px); } }
+  .toast-action {
+    margin-left: 10px; padding: 2px 10px; border-radius: 999px;
+    background: var(--bg); color: var(--text); border: none;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
 
   @media (max-width: 640px) {
     .wrap { padding: 0 16px; }
@@ -1921,6 +1926,70 @@ export const html = `<!DOCTYPE html>
     });
   }
 
+  // IndexedDB helpers — save the raw audio before the API call so a failed
+  // transcription can be retried without re-recording.
+  var _dictDb = null;
+  function openDictationDb() {
+    if (_dictDb) return Promise.resolve(_dictDb);
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open("dictation", 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore("pending"); };
+      req.onsuccess = function () { _dictDb = req.result; resolve(_dictDb); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function savePendingAudio(audio, mimeType) {
+    return openDictationDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction("pending", "readwrite");
+        tx.objectStore("pending").put({ audio: audio, mimeType: mimeType }, "clip");
+        tx.oncomplete = resolve;
+        tx.onerror = function () { reject(tx.error); };
+      });
+    }).catch(function () {}); // best-effort
+  }
+  function deletePendingAudio() {
+    return openDictationDb().then(function (db) {
+      return new Promise(function (resolve) {
+        var tx = db.transaction("pending", "readwrite");
+        tx.objectStore("pending").delete("clip");
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+      });
+    }).catch(function () {});
+  }
+  function loadPendingAudio() {
+    return openDictationDb().then(function (db) {
+      return new Promise(function (resolve) {
+        var req = db.transaction("pending", "readonly").objectStore("pending").get("clip");
+        req.onsuccess = function () { resolve(req.result || null); };
+        req.onerror = function () { resolve(null); };
+      });
+    }).catch(function () { return null; });
+  }
+
+  function sendDictation(audio, mimeType, btn, textarea) {
+    return api("/dictate", { method: "POST", body: { audio: audio, mimeType: mimeType } })
+      .then(function (d) {
+        deletePendingAudio();
+        insertDictation(textarea, d.text);
+      }).catch(function (err) {
+        toast(err.message || "Dictation failed", {
+          label: "Retry",
+          fn: function () {
+            loadPendingAudio().then(function (saved) {
+              if (!saved) { toast("No saved clip to retry"); return; }
+              btn.classList.add("busy");
+              sendDictation(saved.audio, saved.mimeType, btn, textarea)
+                .then(function () { btn.classList.remove("busy"); });
+            });
+          },
+        });
+      }).then(function () {
+        btn.classList.remove("busy");
+      });
+  }
+
   function stopRecording() {
     var rec = recording;
     if (!rec) return;
@@ -1938,6 +2007,7 @@ export const html = `<!DOCTYPE html>
     if (!window.isSecureContext) {
       toast("Dictation needs https or localhost"); return;
     }
+    deletePendingAudio();
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       var mime = recordingMime();
       var recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
@@ -1948,12 +2018,11 @@ export const html = `<!DOCTYPE html>
         var blob = new Blob(chunks, { type: type });
         if (blob.size < 1000) { btn.classList.remove("busy"); return; }   // tapped twice by accident
         blobToBase64(blob).then(function (audio) {
-          return api("/dictate", { method: "POST", body: { audio: audio, mimeType: type } });
-        }).then(function (d) {
-          insertDictation(textarea, d.text);
+          return savePendingAudio(audio, type).then(function () {
+            return sendDictation(audio, type, btn, textarea);
+          });
         }).catch(function (err) {
           toast(err.message || "Dictation failed");
-        }).then(function () {
           btn.classList.remove("busy");
         });
       };
@@ -1974,12 +2043,19 @@ export const html = `<!DOCTYPE html>
     };
   }
 
-  function toast(text) {
+  function toast(text, action) {
     var old = document.querySelector(".toast");
     if (old) old.remove();
     var t = el("div", "toast", text);
+    if (action) {
+      var btn = document.createElement("button");
+      btn.className = "toast-action";
+      btn.textContent = action.label;
+      btn.onclick = function () { t.remove(); action.fn(); };
+      t.appendChild(btn);
+    }
     document.body.appendChild(t);
-    setTimeout(function () { t.remove(); }, 2400);
+    setTimeout(function () { if (t.parentNode) t.remove(); }, action ? 7000 : 2400);
   }
 
   function copyText(text) {

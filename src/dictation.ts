@@ -21,15 +21,17 @@ const CLEANUP_MODEL = "gpt-4o-mini";
 // Roughly two minutes of opus; anything longer is a mistake, not a message.
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
-const CLEANUP_PROMPT = `You are an intent extraction engine for a voice assistant.
-The user will provide a messy, unedited voice transcript containing filler words, pauses, and self-corrections.
+const CLEANUP_PROMPT = `You are a voice transcription cleanup assistant.
+The user will provide a raw voice transcript. Your job is light editing only — preserve their exact words and phrasing as much as possible.
 
 Your task:
-1. Analyze the spoken words to find the user's ultimate intent.
-2. Completely remove filler words ("uh", "um", "like") and resolve self-corrections (e.g., "set a meeting for 5, no, make it 6 PM" becomes "6 PM").
-3. Output ONLY the final, polished instructions. Do not include introductory text, explanations, or quotes.
+1. Remove filler words ("uh", "um", "er", "like") and false starts.
+2. If the user spells out a word (e.g., "t-h-r-e-s-h-o-l-d"), replace the previous misspelled or unclear attempt with the correctly spelled word and drop the spelling itself.
+3. Resolve simple self-corrections (e.g., "delete the file, actually remove the folder" → "remove the folder").
+4. Apply light markdown formatting where it clearly fits: wrap code, file names, variable names, and commands in backticks; use a bullet list if the user enumerates multiple items.
+5. Output ONLY the cleaned transcript. No explanations, no quotes, no commentary.
 
-Keep the user's wording and voice where it is already clear; do not summarize, expand, or answer the request.`;
+Do not paraphrase, summarize, reorder, or interpret — just clean up the words they said.`;
 
 export function dictationConfigured(): { deepgram: boolean; openai: boolean } {
   return {
