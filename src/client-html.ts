@@ -2,7 +2,7 @@ export const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>Jarvis</title>
 <style>
   :root {
@@ -396,7 +396,7 @@ export const html = `<!DOCTYPE html>
     padding: 9px 9px 9px 16px; box-shadow: var(--shadow-sm);
   }
   .box:focus-within { border-color: var(--accent); }
-  .box textarea { flex: 1; border: 0; background: none; resize: none; outline: none; max-height: 200px; padding: 6px 0; }
+  .box textarea { flex: 1; border: 0; background: none; resize: none; outline: none; max-height: 200px; padding: 6px 0; font-size: 16px; }
   .send {
     width: 36px; height: 36px; border-radius: 11px; flex: none;
     background: var(--accent); color: var(--accent-text); font-size: 17px;
