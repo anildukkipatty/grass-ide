@@ -1,6 +1,6 @@
 {
   "name": "jarvis-hq",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Jarvis — a persistent AI engineering partner. One entry point from any device; project-aware handoff and delegation to Claude Code running on your machine.",
   "main": "dist/index.js",
   "bin": {
