@@ -364,6 +364,20 @@ export const html = `<!DOCTYPE html>
     color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 150px; overflow: auto;
   }
   .perm .acts { display: flex; gap: 8px; }
+  .ask-questions { display: flex; flex-direction: column; gap: 16px; margin-bottom: 14px; }
+  .ask-q { display: flex; flex-direction: column; gap: 8px; }
+  .ask-q-text { font-size: 13.5px; font-weight: 500; }
+  .ask-opts { display: flex; flex-direction: column; gap: 6px; }
+  .ask-opt-btn {
+    text-align: left; padding: 7px 12px; border-radius: 8px; font-size: 13px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    cursor: pointer; box-shadow: none;
+  }
+  .ask-opt-btn:hover { border-color: var(--accent); }
+  .ask-opt-btn.selected { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border-color: var(--accent); color: var(--text); }
+  .ask-opt-desc { font-size: 11.5px; color: var(--muted); margin-top: 1px; padding-left: 2px; }
+  .ask-other { width: 100%; padding: 7px 12px; border-radius: 8px; font-size: 13px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); outline: none; }
+  .ask-other:focus { border-color: var(--accent); }
 
   /* --- Composer --- */
   .composer { border-top: 1px solid var(--border); background: var(--bg); }
@@ -1733,6 +1747,7 @@ export const html = `<!DOCTYPE html>
   }
 
   function renderPermission(data) {
+    if (data.toolName === "AskUserQuestion") { renderAskUser(data); return; }
     var card = el("div", "perm");
     card.appendChild(el("div", "head", "Allow " + data.toolName + "?"));
     card.appendChild(el("pre", null, JSON.stringify(data.input, null, 2)));
@@ -1753,6 +1768,100 @@ export const html = `<!DOCTYPE html>
     deny.onclick = function () { respond(false); };
     acts.appendChild(allow);
     acts.appendChild(deny);
+    card.appendChild(acts);
+    $("messages-inner").appendChild(card);
+    scrollDown();
+  }
+
+  function renderAskUser(data) {
+    var input = data.input || {};
+    var questions = Array.isArray(input.questions) ? input.questions : [];
+    var answers = {}; // question text -> selected label(s)
+
+    var card = el("div", "perm");
+    card.appendChild(el("div", "head", "Questions"));
+
+    var qsDiv = el("div", "ask-questions");
+
+    questions.forEach(function (q, qi) {
+      answers[q.question] = q.multiSelect ? [] : null;
+
+      var qDiv = el("div", "ask-q");
+      qDiv.appendChild(el("div", "ask-q-text", q.question));
+
+      var optsDiv = el("div", "ask-opts");
+
+      (q.options || []).forEach(function (opt) {
+        var row = el("div");
+        var btn = el("button", "ask-opt-btn", opt.label);
+        btn.onclick = function () {
+          if (q.multiSelect) {
+            var arr = answers[q.question];
+            var idx = arr.indexOf(opt.label);
+            if (idx >= 0) { arr.splice(idx, 1); btn.classList.remove("selected"); }
+            else { arr.push(opt.label); btn.classList.add("selected"); }
+          } else {
+            answers[q.question] = opt.label;
+            optsDiv.querySelectorAll(".ask-opt-btn").forEach(function (b) { b.classList.remove("selected"); });
+            btn.classList.add("selected");
+          }
+        };
+        row.appendChild(btn);
+        if (opt.description) row.appendChild(el("div", "ask-opt-desc", opt.description));
+        optsDiv.appendChild(row);
+      });
+
+      var otherInput = el("input");
+      otherInput.type = "text";
+      otherInput.placeholder = "Other\u2026";
+      otherInput.className = "ask-other";
+      otherInput.oninput = function () {
+        var val = otherInput.value.trim();
+        if (q.multiSelect) {
+          // handled on submit
+        } else {
+          if (val) {
+            answers[q.question] = val;
+            optsDiv.querySelectorAll(".ask-opt-btn").forEach(function (b) { b.classList.remove("selected"); });
+          } else if (!answers[q.question] || typeof answers[q.question] === "string") {
+            answers[q.question] = null;
+          }
+        }
+      };
+      optsDiv.appendChild(otherInput);
+      qDiv.appendChild(optsDiv);
+      qsDiv.appendChild(qDiv);
+    });
+
+    card.appendChild(qsDiv);
+
+    var acts = el("div", "acts");
+    var submit = el("button", "btn primary", "Submit");
+    submit.onclick = function () {
+      // Collect "other" text inputs for multi-select questions
+      var qDivs = qsDiv.querySelectorAll(".ask-q");
+      questions.forEach(function (q, qi) {
+        if (q.multiSelect) {
+          var inp = qDivs[qi].querySelector(".ask-other");
+          var val = inp ? inp.value.trim() : "";
+          if (val && answers[q.question].indexOf(val) === -1) answers[q.question].push(val);
+        }
+      });
+      submit.disabled = true;
+      api("/sessions/" + encodeURIComponent(sessionId) + "/permission", {
+        method: "POST",
+        body: { toolUseID: data.toolUseID, answers: answers }
+      }).then(function () {
+        var summary = questions.map(function (q) {
+          var a = answers[q.question];
+          return Array.isArray(a) ? a.join(", ") : (a || "\u2014");
+        }).join(" \u00b7 ");
+        card.replaceWith(el("div", "note", summary));
+        pendingPerms = Math.max(0, pendingPerms - 1);
+        if (!pendingPerms && state === "running") setActivity("Thinking\u2026");
+      }).catch(showError);
+    };
+    acts.appendChild(submit);
     card.appendChild(acts);
     $("messages-inner").appendChild(card);
     scrollDown();

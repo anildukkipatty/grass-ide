@@ -233,7 +233,7 @@ export async function handleRequest(
       const store = sessions.get(permBase);
       if (!store) { jsonError(res, 404, "Session not found"); return; }
       const body = await readBody(req);
-      const { toolUseID, approved, updatedInput } = body;
+      const { toolUseID, approved, updatedInput, answers } = body;
       if (!toolUseID) { jsonError(res, 400, "toolUseID is required"); return; }
       console.log(`[permission] id=${toolUseID} approved=${approved}`);
 
@@ -242,10 +242,20 @@ export async function handleRequest(
         if (pending) {
           store.pendingPermissions.delete(toolUseID);
           notifyPermissionsChanged();
-          pending.resolve(approved
-            ? { behavior: "allow", updatedInput: updatedInput ?? pending.input }
-            : { behavior: "deny", message: "User denied" }
-          );
+          if (pending.toolName === "AskUserQuestion" && answers) {
+            const questions: any[] = pending.input?.questions ?? [];
+            const lines = questions.map((q: any) => {
+              const a = answers[q.question];
+              const answer = Array.isArray(a) ? (a.length ? a.join(", ") : "(none selected)") : (a || "(no answer)");
+              return `- ${q.question}: ${answer}`;
+            });
+            pending.resolve({ behavior: "deny", message: "User's answers:\n" + lines.join("\n") });
+          } else {
+            pending.resolve(approved
+              ? { behavior: "allow", updatedInput: updatedInput ?? pending.input }
+              : { behavior: "deny", message: "User denied" }
+            );
+          }
         }
       } else if (store.agent === "opencode" && store.sdkSessionId) {
         const pending = store.pendingPermissions.get(toolUseID);
