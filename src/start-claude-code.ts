@@ -348,6 +348,7 @@ function formatMessage(
             type: "tool_use",
             tool_name: block.name,
             tool_input: formatToolInput(block.name, block.input),
+            ...todoList(block.name, block.input),
           });
         }
       }
@@ -473,7 +474,7 @@ export async function loadTranscript(
               } catch {
                 tool_input = JSON.stringify(b.input) ?? "";
               }
-              blocks.push({ type: "tool_use", tool_name: b.name, tool_input });
+              blocks.push({ type: "tool_use", tool_name: b.name, tool_input, ...todoList(b.name, b.input) });
             }
           }
         }
@@ -575,6 +576,26 @@ export async function listSessions(
     return [];
   }
 }
+
+/**
+ * The plan panel needs the list as a list, not as the one-line summary the tool
+ * chip shows. Carried as a separate field so the chip keeps rendering unchanged,
+ * and spread in so every other tool's payload stays exactly as it was.
+ */
+function todoList(toolName: string, input: Record<string, unknown>): { todos?: TodoItem[] } {
+  if (toolName !== "TodoWrite") return {};
+  const todos = (input as { todos?: unknown }).todos;
+  if (!Array.isArray(todos)) return {};
+  return {
+    todos: todos.map((t: any) => ({
+      content: String(t?.content ?? ""),
+      status: String(t?.status ?? "pending"),
+      activeForm: String(t?.activeForm ?? ""),
+    })),
+  };
+}
+
+type TodoItem = { content: string; status: string; activeForm: string };
 
 function formatToolInput(toolName: string, input: Record<string, unknown>): string {
   switch (toolName) {

@@ -394,6 +394,32 @@ export const html = `<!DOCTYPE html>
   .composer .wrap { padding-top: 12px; padding-bottom: 18px; }
   .activity { display: flex; align-items: center; gap: 8px; height: 22px; padding-left: 4px; color: var(--muted); font-size: 12.5px; }
   .activity:empty { display: none; }
+
+  /* --- Plan panel --- */
+  /* The agent's todo list, kept above the input so the current step is always
+     in view. Collapsed to a single line by default; the list it hides is capped
+     in height so a long plan can never crowd out the conversation. */
+  .plan { margin-bottom: 9px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .plan-bar {
+    display: flex; align-items: center; gap: 9px; width: 100%;
+    padding: 9px 12px; font-size: 12.5px; text-align: left;
+  }
+  .plan-now { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .plan.active .plan-now { color: var(--accent); font-weight: 500; }
+  .plan-count { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .plan-chev { flex: none; color: var(--faint); font-size: 15px; line-height: 1; transition: transform .15s ease; }
+  .plan.open .plan-chev { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: reduce) { .plan-chev { transition: none; } }
+  .plan-list {
+    margin: 0; padding: 3px 12px 10px; list-style: none;
+    max-height: 33vh; overflow-y: auto; border-top: 1px solid var(--border);
+  }
+  .plan-item { display: flex; gap: 9px; align-items: baseline; padding: 4px 0; font-size: 13px; }
+  .plan-mark { flex: none; width: 13px; text-align: center; color: var(--faint); }
+  .plan-item.in_progress .plan-mark, .plan-item.in_progress { color: var(--accent); }
+  .plan-item.in_progress { font-weight: 500; }
+  .plan-item.completed { color: var(--faint); text-decoration: line-through; }
+  .plan-item.completed .plan-mark { color: var(--ok); text-decoration: none; }
   .spinner {
     width: 11px; height: 11px; flex: none; border-radius: 50%;
     border: 1.5px solid var(--border); border-top-color: var(--accent); animation: spin .7s linear infinite;
@@ -607,6 +633,14 @@ export const html = `<!DOCTYPE html>
   <div class="composer">
     <button class="jump" id="jump"><span class="chev">&darr;</span> New messages</button>
     <div class="wrap narrow">
+      <div class="plan" id="plan" hidden>
+        <button class="plan-bar" id="plan-bar" aria-expanded="false">
+          <span class="plan-now" id="plan-now"></span>
+          <span class="plan-count" id="plan-count"></span>
+          <span class="plan-chev" id="plan-chev">&rsaquo;</span>
+        </button>
+        <ul class="plan-list" id="plan-list" hidden></ul>
+      </div>
       <div class="activity" id="activity"></div>
       <div class="box">
         <textarea id="input" rows="1" placeholder="Message…"></textarea>
@@ -1356,6 +1390,65 @@ export const html = `<!DOCTYPE html>
     box.hidden = false;
   }
 
+  // --- Plan panel ---
+  // The agent's own todo list, mirrored above the input so the step it is on is
+  // always in view. TodoWrite always writes the whole plan, so each call simply
+  // replaces what the panel shows; there is nothing to merge or diff. Collapsed
+  // to one line by default, and the line itself is the cue — it changes as the
+  // agent moves through the list.
+
+  var planOpen = false;   // sticky across updates, reset when a thread opens
+  var PLAN_MARKS = { completed: "\\u2713", in_progress: "\\u25b8", pending: "\\u2610" };
+
+  function renderTodos(todos) {
+    var box = $("plan");
+    if (!todos || !todos.length) { box.hidden = true; return; }
+
+    var done = 0, current = null, firstPending = null;
+    todos.forEach(function (t) {
+      if (t.status === "completed") done++;
+      else if (t.status === "in_progress" && !current) current = t;
+      else if (t.status === "pending" && !firstPending) firstPending = t;
+    });
+    var shown = current || firstPending;
+
+    // activeForm is the present-continuous wording the tool asks for, which is
+    // exactly what a status line wants; content is the fallback.
+    $("plan-now").textContent = shown ? (shown.activeForm || shown.content) : "Plan complete";
+    $("plan-count").textContent = done + "/" + todos.length;
+
+    var list = $("plan-list");
+    list.innerHTML = "";
+    todos.forEach(function (t) {
+      var li = el("li", "plan-item " + t.status);
+      li.appendChild(el("span", "plan-mark", PLAN_MARKS[t.status] || PLAN_MARKS.pending));
+      li.appendChild(el("span", null, t.content));
+      list.appendChild(li);
+    });
+
+    setPlanOpen(planOpen);
+    box.hidden = false;
+  }
+
+  function setPlanOpen(open) {
+    planOpen = open;
+    var box = $("plan");
+    var lit = box.querySelector(".plan-item.in_progress");
+    box.className = "plan" + (lit ? " active" : "") + (open ? " open" : "");
+    $("plan-list").hidden = !open;
+    $("plan-bar").setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  /** The last plan the thread ever wrote, so reopening it days later still
+   *  shows where the work got to rather than an empty panel. */
+  function seedPlan(msgs) {
+    var last = null;
+    msgs.forEach(function (m) {
+      (m.content || []).forEach(function (b) { if (b.todos) last = b.todos; });
+    });
+    renderTodos(last);
+  }
+
   // --- Thread ---
   function openThread(thread) {
     activeThread = thread;
@@ -1364,6 +1457,8 @@ export const html = `<!DOCTYPE html>
     $("thread-sub").textContent = shortPath(thread.repoPath, 30);
     $("thread-sub").title = thread.repoPath || "";
     renderContext(thread.context);
+    planOpen = false;
+    renderTodos(null);
     $("to-bot-label").textContent = threadBack === "jarvis" ? "Jarvis" : (activeBot ? activeBot.name : "Back");
     var av = $("thread-avatar");
     av.textContent = activeBot ? (activeBot.emoji || "\\u{1F916}") : "\\u{1F916}";
@@ -1400,6 +1495,7 @@ export const html = `<!DOCTYPE html>
       box.appendChild(e);
       return;
     }
+    seedPlan(msgs);
     msgs.forEach(function (m) {
       var content = startMessage(m.role === "user" ? "user" : "assistant");
       (m.content || []).forEach(function (b) {
@@ -1682,6 +1778,7 @@ export const html = `<!DOCTYPE html>
       case "tool_use":
         if (!liveBubble) liveBubble = startMessage("assistant");
         appendTool(liveBubble, data.tool_name, data.tool_input);
+        if (data.todos) renderTodos(data.todos);
         break;
 
       case "context":
@@ -2503,6 +2600,7 @@ export const html = `<!DOCTYPE html>
   $("to-jarvis").onclick = function () { goJarvis(); };
   $("to-projects").onclick = function () { goHome(); };
   $("to-bot").onclick = function () { if (threadBack === "jarvis") goJarvis(); else goBotView(); };
+  $("plan-bar").onclick = function () { setPlanOpen(!planOpen); };
   $("ask-send").onclick = function () { askJarvis($("ask-input").value); };
   var ask = $("ask-input");
   ask.addEventListener("input", function () {
