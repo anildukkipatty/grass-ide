@@ -346,12 +346,25 @@ export const html = `<!DOCTYPE html>
   .msg.user .who { text-align: right; }
 
   .tool {
-    display: flex; align-items: center; gap: 9px; margin-top: 7px;
+    display: flex; align-items: center; gap: 9px; margin-top: 7px; width: 100%; text-align: left;
     background: var(--surface-2); border-radius: 10px; padding: 7px 11px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted);
+    cursor: default;
   }
-  .tool b { color: var(--text); font-weight: 600; flex: none; }
-  .tool span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool b { color: var(--text); font-weight: 600; flex: none; align-self: flex-start; }
+  .tool-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Only chips with more to show become interactive; the rest stay plain labels. */
+  .tool.more { cursor: pointer; }
+  .tool.more:hover { background: var(--border); }
+  .tool-chev { display: none; flex: none; align-self: flex-start; color: var(--faint); font-size: 15px; line-height: 1.3; transition: transform .15s ease; }
+  .tool.more .tool-chev { display: block; }
+  @media (prefers-reduced-motion: reduce) { .tool-chev { transition: none; } }
+  .tool.open { align-items: flex-start; }
+  .tool.open .tool-chev { transform: rotate(90deg); }
+  .tool.open .tool-text {
+    white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip; cursor: auto;
+    max-height: 40vh; overflow-y: auto; overscroll-behavior: contain;
+  }
   .note { color: var(--faint); font-size: 12.5px; text-align: center; font-style: italic; }
 
   .perm {
@@ -1574,13 +1587,57 @@ export const html = `<!DOCTYPE html>
     }
   }
 
+  var TOOL_PEEK = 200;   // how much of the input the collapsed one-liner carries
+
+  /** A chip's full text, laid out to be read: dense JSON gets indented, anything
+   *  else is shown as the agent wrote it. */
+  function toolFullText(summary) {
+    var t = summary.charAt(0);
+    if (t === "{" || t === "[") {
+      try { return JSON.stringify(JSON.parse(summary), null, 2); } catch (e) {}
+    }
+    return summary;
+  }
+
   function appendTool(content, name, input) {
     var chip = el("div", "tool");
     // Jarvis's own tools read better without the MCP plumbing in the name.
     chip.appendChild(el("b", null, name.replace(/^mcp__jarvis__/, "")));
     var summary = typeof input === "string" ? input : JSON.stringify(input || {});
-    chip.appendChild(el("span", null, summary.slice(0, 200)));
+    var text = el("span", "tool-text", summary.slice(0, TOOL_PEEK));
+    chip.appendChild(text);
+    chip.appendChild(el("span", "tool-chev", "\u203A"));
     content.appendChild(chip);
+
+    // The chip only becomes clickable when the one-liner is actually hiding
+    // something: text cut by the peek, newlines flattened into it, or an
+    // ellipsis from the overflow. Measured now that it is laid out.
+    var hidden = summary.length > TOOL_PEEK || summary.indexOf("\\n") >= 0
+      || text.scrollWidth > text.clientWidth + 1;
+    if (hidden) {
+      var open = false;
+      chip.className = "tool more";
+      chip.setAttribute("role", "button");
+      chip.setAttribute("tabindex", "0");
+      chip.setAttribute("aria-expanded", "false");
+      chip.title = "Show the full input";
+      var toggle = function () {
+        open = !open;
+        chip.className = "tool more" + (open ? " open" : "");
+        chip.setAttribute("aria-expanded", open ? "true" : "false");
+        chip.title = open ? "Hide the full input" : "Show the full input";
+        text.textContent = open ? toolFullText(summary) : summary.slice(0, TOOL_PEEK);
+      };
+      // Once open the text belongs to the reader: clicks land in it to select or
+      // scroll it, and the name and chevron are what close it again.
+      chip.onclick = function (ev) {
+        if (!open || !text.contains(ev.target)) toggle();
+      };
+      chip.onkeydown = function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(); }
+      };
+    }
+
     scrollDown();
   }
 
