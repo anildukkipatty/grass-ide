@@ -380,7 +380,17 @@ export const html = `<!DOCTYPE html>
   .ask-other:focus { border-color: var(--accent); }
 
   /* --- Composer --- */
-  .composer { border-top: 1px solid var(--border); background: var(--bg); }
+  .composer { border-top: 1px solid var(--border); background: var(--bg); position: relative; }
+  /* Only on screen once the reader has left the tail and missed something. */
+  .jump {
+    position: absolute; bottom: calc(100% + 12px); left: 0; right: 0; margin: 0 auto;
+    display: none; align-items: center; gap: 7px; width: max-content;
+    padding: 8px 15px; border-radius: 999px; border: none;
+    background: var(--accent); color: var(--accent-text);
+    font-size: 13px; font-weight: 600; box-shadow: var(--shadow-md);
+  }
+  .jump.show { display: flex; }
+  .jump .chev { font-size: 15px; line-height: 1; }
   .composer .wrap { padding-top: 12px; padding-bottom: 18px; }
   .activity { display: flex; align-items: center; gap: 8px; height: 22px; padding-left: 4px; color: var(--muted); font-size: 12.5px; }
   .activity:empty { display: none; }
@@ -594,14 +604,17 @@ export const html = `<!DOCTYPE html>
     </div>
   </div></div>
   <div class="messages" id="messages"><div class="wrap narrow" id="messages-inner"></div></div>
-  <div class="composer"><div class="wrap narrow">
-    <div class="activity" id="activity"></div>
-    <div class="box">
-      <textarea id="input" rows="1" placeholder="Message…"></textarea>
-      <button class="mic" id="mic" title="Dictate" aria-label="Dictate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v5a4 4 0 0 0 4 4zm6-4a6 6 0 0 1-5 5.92V20h3v2H8v-2h3v-3.08A6 6 0 0 1 6 11h2a4 4 0 0 0 8 0h2z"/></svg></button>
-      <button class="send" id="send" title="Send" aria-label="Send">&uarr;</button>
+  <div class="composer">
+    <button class="jump" id="jump"><span class="chev">&darr;</span> New messages</button>
+    <div class="wrap narrow">
+      <div class="activity" id="activity"></div>
+      <div class="box">
+        <textarea id="input" rows="1" placeholder="Message…"></textarea>
+        <button class="mic" id="mic" title="Dictate" aria-label="Dictate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v5a4 4 0 0 0 4 4zm6-4a6 6 0 0 1-5 5.92V20h3v2H8v-2h3v-3.08A6 6 0 0 1 6 11h2a4 4 0 0 0 8 0h2z"/></svg></button>
+        <button class="send" id="send" title="Send" aria-label="Send">&uarr;</button>
+      </div>
     </div>
-  </div></div>
+  </div>
 </section>
 
 <script>
@@ -1379,6 +1392,7 @@ export const html = `<!DOCTYPE html>
   function renderTranscript(msgs) {
     var box = $("messages-inner");
     box.innerHTML = "";
+    forceBottom();   // a freshly opened transcript always starts at its tail
     if (!msgs.length) {
       var e = el("div", "empty");
       e.appendChild(el("h3", null, "Say the first thing"));
@@ -1394,6 +1408,7 @@ export const html = `<!DOCTYPE html>
         else if (b.type === "image_url") {
           var img = document.createElement("img");
           img.src = b.url; img.style.maxWidth = "100%"; img.style.borderRadius = "12px";
+          img.onload = scrollDown;   // an image finishing late grows the list under us
           content.appendChild(img);
         }
       });
@@ -1473,9 +1488,49 @@ export const html = `<!DOCTYPE html>
     scrollDown();
   }
 
-  function scrollDown() {
+  // --- Sticking to the tail ---
+  // The list follows new content only while the reader is already at the bottom.
+  // Scroll up to read something and the conversation stays where you put it,
+  // with a pill offering the way back down once it has moved on without you.
+  var stick = true;           // following the tail?
+  var missed = false;         // has anything arrived since we stopped following?
+  var SLACK = 64;             // px from the bottom that still counts as "at the bottom"
+
+  function atBottom() {
+    var m = $("messages");
+    return m.scrollHeight - m.scrollTop - m.clientHeight <= SLACK;
+  }
+
+  function pin() {
     var m = $("messages");
     m.scrollTop = m.scrollHeight;
+  }
+
+  function renderJump() {
+    $("jump").classList.toggle("show", !stick && missed);
+  }
+
+  /** New content arrived: follow it, or note that the reader has missed it. */
+  function scrollDown() {
+    if (stick) pin();
+    else if (!missed) { missed = true; renderJump(); }
+  }
+
+  /** Go to the tail whatever the reader was doing — for the moments that mean
+   *  "show me the latest": opening a thread, sending, tapping the pill. */
+  function forceBottom() {
+    stick = true;
+    missed = false;
+    pin();
+    renderJump();
+  }
+
+  function watchScroll() {
+    var here = atBottom();
+    if (here === stick) return;
+    stick = here;
+    if (stick) missed = false;
+    renderJump();
   }
 
   function showError(err) {
@@ -1497,6 +1552,7 @@ export const html = `<!DOCTYPE html>
   function sendText(text) {
     if (!text || !activeThread || state !== "idle") return;
     appendText(startMessage("user"), text);
+    forceBottom();   // your own message always brings you back down
     setState("starting");
     setActivity("Sending\u2026");
 
@@ -2460,10 +2516,16 @@ export const html = `<!DOCTYPE html>
   wireMic($("ask-mic"), $("ask-input"));
   wireMic($("mic"), $("input"));
 
+  $("messages").addEventListener("scroll", watchScroll, { passive: true });
+  $("jump").onclick = forceBottom;
+  // The on-screen keyboard and rotation both shrink the list out from under us.
+  window.addEventListener("resize", function () { if (stick) pin(); });
+
   var input = $("input");
   input.addEventListener("input", function () {
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 200) + "px";
+    if (stick) pin();   // a growing composer eats into the list; hold the tail
   });
   input.addEventListener("keydown", function (ev) {
     if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); if (state === "idle") send(); }
